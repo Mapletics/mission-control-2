@@ -267,17 +267,20 @@ function mergeSessionOutput(existing: string, incoming: string): string {
   return `${basePrefix}${SESSION_OUTPUT_MARKER}\n\n${nextSession}`;
 }
 
-function describeDelivery(d: CronJob["delivery"]): {
+function describeDelivery(
+  d: CronJob["delivery"] | null | undefined,
+): {
   label: string;
   hasIssue: boolean;
   issue?: string;
 } {
-  if (!d.mode || d.mode === "none")
+  const safe = d ?? { mode: "none" as const };
+  if (!safe.mode || safe.mode === "none")
     return { label: "No delivery", hasIssue: false };
-  const parts: string[] = [d.mode];
-  if (d.channel) parts.push(`→ ${d.channel}`);
-  if (d.to) parts.push(`→ ${d.to}`);
-  const hasIssue = d.mode === "announce" && !d.to;
+  const parts: string[] = [safe.mode];
+  if (safe.channel) parts.push(`→ ${safe.channel}`);
+  if (safe.to) parts.push(`→ ${safe.to}`);
+  const hasIssue = safe.mode === "announce" && !safe.to;
   return {
     label: parts.join(" "),
     hasIssue,
@@ -1831,7 +1834,29 @@ export function CronView() {
     try {
       const res = await fetch("/api/cron");
       const data = await res.json();
-      setJobs(data.jobs || []);
+      const incoming = Array.isArray(data.jobs) ? (data.jobs as CronJob[]) : [];
+      // Some older cron jobs may not have delivery fields; normalize to avoid UI crashes.
+      setJobs(
+        incoming.map((job) => ({
+          ...job,
+          delivery:
+            job.delivery && typeof job.delivery === "object"
+              ? job.delivery
+              : { mode: "none" },
+          payload:
+            job.payload && typeof job.payload === "object"
+              ? job.payload
+              : { kind: "agentTurn" },
+          schedule:
+            job.schedule && typeof job.schedule === "object"
+              ? job.schedule
+              : { kind: "cron" as const, expr: "* * * * *" },
+          state:
+            job.state && typeof job.state === "object"
+              ? job.state
+              : {},
+        })),
+      );
     } catch {
       /* ignore */
     }
