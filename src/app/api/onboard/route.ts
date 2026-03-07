@@ -642,18 +642,29 @@ export async function POST(request: NextRequest) {
           steps.push("Gateway running");
         }
 
-        // 5. Scaffold workspace via `openclaw setup --non-interactive`.
-        //    This is the official CLI command for initializing openclaw.json
-        //    and the agent workspace with all foundational files (SOUL.md,
-        //    IDENTITY.md, USER.md, AGENTS.md, TOOLS.md, MEMORY.md, etc.).
-        //    Safe to call when workspace already exists — it's a no-op.
+        // 5. Scaffold workspace via `openclaw onboard --non-interactive`.
+        //    The onboard command initializes openclaw.json and the agent
+        //    workspace with all foundational files. We skip channels, daemon,
+        //    health, skills, and UI since those are already handled above or
+        //    are not needed during quick-setup.
         try {
           const workspace = await getDefaultWorkspace();
           const workspaceExists = await fileExists(join(workspace, "SOUL.md"));
           if (!workspaceExists) {
             try {
               await runCli(
-                ["setup", "--non-interactive", "--workspace", workspace],
+                [
+                  "onboard",
+                  "--non-interactive",
+                  "--accept-risk",
+                  "--workspace", workspace,
+                  "--skip-channels",
+                  "--skip-daemon",
+                  "--skip-health",
+                  "--skip-skills",
+                  "--skip-ui",
+                  "--auth-choice", "skip",
+                ],
                 30000,
               );
               steps.push("Workspace initialized");
