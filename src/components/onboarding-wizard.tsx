@@ -382,7 +382,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
   const [botUsername, setBotUsername] = useState("");
   const [pairingTimeout, setPairingTimeout] = useState(false);
   const [pairingError, setPairingError] = useState<string | null>(null);
-  const [healthProgress, setHealthProgress] = useState(0);
+  // healthProgress removed — no meaningful way to measure gateway startup
 
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [showSkipConfirm, setShowSkipConfirm] = useState(false);
@@ -594,11 +594,9 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
     }
   }, [saveCredentials]);
 
-  const waitForGatewayHealth = useCallback(async (channel?: string, maxAttempts = 15): Promise<boolean> => {
-    setHealthProgress(0);
+  const waitForGatewayHealth = useCallback(async (channel?: string, maxAttempts = 30): Promise<boolean> => {
     const url = channel ? `/api/channels/health?channel=${encodeURIComponent(channel)}` : "/api/channels/health";
     for (let i = 0; i < maxAttempts; i++) {
-      setHealthProgress(Math.round(((i + 1) / maxAttempts) * 100));
       try {
         const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(5000) });
         if (res.ok) {
@@ -607,7 +605,6 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
           if (channel && data.channelReady === false) {
             // Gateway is up but channel not ready yet — keep polling
           } else {
-            setHealthProgress(100);
             return true;
           }
         }
@@ -685,7 +682,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
       const healthy = await waitForGatewayHealth(currentChannel.id);
       if (abort.signal.aborted) return;
       if (!healthy) {
-        throw new Error("The gateway is taking longer than expected to restart. You can try again or check that the gateway is running.");
+        throw new Error("Connection is taking a while — please try again. If it keeps failing, check that your token is correct.");
       }
 
       setConnectPhase("ready");
@@ -999,11 +996,9 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
                     <p className="mt-1 text-xs text-muted-foreground">
                       Connect a channel so your agent can chat. You can skip this for now.
                     </p>
-                    {status?.gatewayRunning === false && (
-                      <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                        The gateway is not running. Channel setup requires a running gateway — it will be started automatically when you finish setup, or you can start it manually first.
-                      </div>
-                    )}
+                    {/* Gateway-not-running warning removed — the onboarding flow
+                        starts the gateway automatically during quick-setup, so this
+                        warning was either stale or alarming for no reason. */}
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -1094,7 +1089,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
                               <span>
                                 {connectPhase === "validating" ? "Checking token..." :
                                  connectPhase === "saving" ? "Saving config..." :
-                                 connectPhase === "restarting" ? `Starting gateway${healthProgress > 0 ? ` (${healthProgress}%)` : ""}...` :
+                                 connectPhase === "restarting" ? "Starting gateway..." :
                                  "Connecting..."}
                               </span>
                             </span>
@@ -1138,7 +1133,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
                             <TypingDots size="sm" className="text-current" />
                             <span>
                               {connectPhase === "saving" ? "Saving config..." :
-                               connectPhase === "restarting" ? `Starting gateway${healthProgress > 0 ? ` (${healthProgress}%)` : ""}...` :
+                               connectPhase === "restarting" ? "Starting gateway..." :
                                "Connecting..."}
                             </span>
                           </span>
@@ -1490,7 +1485,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
               setConnectPhase("restarting");
               const healthy = await waitForGatewayHealth(qrChannel);
               if (!healthy) {
-                throw new Error("Gateway did not come back online. Check the logs.");
+                throw new Error("Connection is taking a while — please try again.");
               }
 
               setConnectPhase("ready");
