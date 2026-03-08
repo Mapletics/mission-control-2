@@ -11,7 +11,6 @@ import {
   Clock,
   Calendar,
   MessageSquare,
-  Radio,
   Brain,
   FolderOpen,
   Settings,
@@ -41,7 +40,6 @@ import {
   Stethoscope,
   HelpCircle,
   Puzzle,
-  Rocket,
 } from "lucide-react";
 import { getChatUnreadCount, subscribeChatStore } from "@/lib/chat-store";
 
@@ -61,14 +59,12 @@ const isAgentbayHosting = process.env.NEXT_PUBLIC_AGENTBAY_HOSTED === "true";
 const navItems: NavItem[] = [
   // ── Overview ──
   { group: "Overview", section: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { section: "setup", label: "Setup Guide", icon: Rocket, href: "/onboard" },
   { section: "activity", label: "Activity", icon: Activity, href: "/activity" },
   { section: "usage", label: "Usage", icon: BarChart3, href: "/usage" },
   // ── Agents ──
   { group: "Agents", section: "agents", label: "Agents", icon: Users, href: "/agents" },
   { section: "agents", label: "Subagents", icon: Users2, href: "/agents?tab=subagents", tab: "subagents", isSubItem: true },
   { section: "chat", label: "Chat", icon: MessageCircle, href: "/chat" },
-  { section: "channels", label: "Channels", icon: Radio, href: "/channels" },
   { section: "sessions", label: "Sessions", icon: MessageSquare, href: "/sessions" },
   // ── Work ──
   { group: "Work", section: "tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
@@ -115,12 +111,11 @@ function deriveSectionFromPath(pathname: string): string | null {
   if (pathname.startsWith("/skills/")) return "skills";
   const first = pathname.split("/").filter(Boolean)[0] || "";
   const aliases: Record<string, string> = {
-    system: "channels",
+    system: "dashboard",
     documents: "docs",
     memories: "memory",
     permissions: "security",
     heartbeat: "cron",
-    onboard: "setup",
   };
   if (aliases[first]) return aliases[first];
   const known = new Set([
@@ -133,7 +128,6 @@ function deriveSectionFromPath(pathname: string): string | null {
     "sessions",
     "cron",
     "heartbeat",
-    "channels",
     "memory",
     "docs",
     "vectors",
@@ -154,7 +148,6 @@ function deriveSectionFromPath(pathname: string): string | null {
     "config",
     "settings",
     "activity",
-    "setup",
     "help",
   ]);
   return known.has(first) ? first : null;

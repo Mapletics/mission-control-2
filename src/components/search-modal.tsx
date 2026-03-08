@@ -16,7 +16,6 @@ import {
   BarChart3,
   Users,
   MessageCircle,
-  Radio,
   MessageSquare,
   ListChecks,
   Calendar,
@@ -38,7 +37,6 @@ import {
   Volume2,
   Waypoints,
   Settings,
-  Rocket,
   AlertTriangle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -77,12 +75,10 @@ type Props = {
 
 const quickActions: QuickAction[] = [
   { id: "dashboard", label: "Dashboard", group: "Overview", href: "/dashboard", icon: LayoutDashboard, keywords: ["home", "overview", "main"] },
-  { id: "setup", label: "Setup Guide", group: "Overview", href: "/onboard", icon: Rocket, keywords: ["onboarding", "getting started", "wizard"] },
   { id: "activity", label: "Activity", group: "Overview", href: "/activity", icon: Activity, keywords: ["log", "events", "history"] },
   { id: "usage", label: "Usage", group: "Overview", href: "/usage", icon: BarChart3, keywords: ["stats", "metrics", "analytics"] },
   { id: "agents", label: "Agents", group: "Agents", href: "/agents", icon: Users, keywords: ["bots", "assistants"] },
   { id: "chat", label: "Chat", group: "Agents", href: "/chat", icon: MessageCircle, keywords: ["message", "talk", "ping"] },
-  { id: "channels", label: "Channels", group: "Agents", href: "/channels", icon: Radio, keywords: ["slack", "discord", "webhook"] },
   { id: "sessions", label: "Sessions", group: "Agents", href: "/sessions", icon: MessageSquare, keywords: ["conversations", "threads"] },
   { id: "tasks", label: "Tasks", group: "Work", href: "/tasks", icon: ListChecks, keywords: ["todo", "jobs", "queue"] },
   { id: "calendar", label: "Calendar", group: "Work", href: "/calendar", icon: Calendar, keywords: ["schedule", "events", "date"] },

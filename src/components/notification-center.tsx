@@ -72,7 +72,7 @@ const TYPE_ROUTE: Record<string, string> = {
   session: "/sessions",
   log: "/logs",
   system: "/activity",
-  pairing: "/channels",
+  pairing: "/dashboard",
   "usage-alert": "/usage",
 };
 

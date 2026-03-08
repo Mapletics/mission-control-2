@@ -666,16 +666,6 @@ export function DashboardView() {
   const [lastRefresh, setLastRefresh] = useState(0);
   const [now, setNow] = useState(() => Date.now());
   const [pairingSummary, setPairingSummary] = useState<PairingSummary | null>(null);
-  const [onboardStatus, setOnboardStatus] = useState<{
-    installed: boolean;
-    configured: boolean;
-  } | null>(null);
-  const [onboardDismissed, setOnboardDismissed] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("mc-onboard-dismissed") === "1";
-    }
-    return false;
-  });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { stats: sysStats, connected: sseConnected } = useSystemStats();
@@ -709,10 +699,6 @@ export function DashboardView() {
     fetch("/api/pairing", { cache: "no-store" })
       .then((r) => r.json())
       .then(setPairingSummary)
-      .catch(() => { });
-    fetch("/api/onboard", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d) => setOnboardStatus({ installed: d.installed, configured: d.configured }))
       .catch(() => { });
 
     const startLivePolling = () => {
@@ -792,7 +778,7 @@ export function DashboardView() {
       title: "Gateway is offline",
       detail: "The OpenClaw gateway process is not responding. Most features will not work.",
       fixLabel: "Restart Gateway",
-      fixHref: "/channels",
+      fixHref: "/dashboard",
     });
   }
 
@@ -835,16 +821,6 @@ export function DashboardView() {
     }
   }
 
-  if (system && system.stats.totalChannels === 0) {
-    issues.push({
-      id: "no-channels",
-      severity: "warning",
-      title: "No messaging channels connected",
-      detail: "Connect Telegram, WhatsApp, or another channel to receive agent messages.",
-      fixLabel: "Setup Channel",
-      fixHref: "/channels",
-    });
-  }
 
   if (live.cron.stats.total === 0) {
     issues.push({
@@ -881,49 +857,6 @@ export function DashboardView() {
 
       <SectionBody width="content" padding="regular" innerClassName="space-y-6">
         <div className="space-y-6">
-          {/* ── Onboarding banner ──────────────────────── */}
-          {onboardStatus && !onboardStatus.configured && !onboardDismissed && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/10">
-              <div className="flex items-start gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-500/15">
-                  <Rocket className="h-4.5 w-4.5 text-emerald-700 dark:text-emerald-300" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-semibold text-stone-900 dark:text-stone-100">
-                    {onboardStatus.installed
-                      ? "Set up your agent"
-                      : "Install OpenClaw to get started"}
-                  </h3>
-                  <p className="mt-0.5 text-sm text-stone-600 dark:text-stone-300">
-                    {onboardStatus.installed
-                      ? "Configure your AI model and API key to get your agent running."
-                      : "OpenClaw needs to be installed before Mission Control can work."}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Link
-                    href="/onboard"
-                    className="inline-flex items-center gap-1.5 rounded-lg bg-stone-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-stone-700 dark:bg-stone-100 dark:text-stone-900 dark:hover:bg-stone-300"
-                  >
-                    {onboardStatus.installed ? "Set up" : "Install"}
-                    <ArrowRight className="h-3 w-3" />
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOnboardDismissed(true);
-                      localStorage.setItem("mc-onboard-dismissed", "1");
-                    }}
-                    className="rounded-md p-1 text-muted-foreground/40 transition-colors hover:text-muted-foreground"
-                    title="Dismiss"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* ── Stat cards ─────────────────────────────── */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <StatCard

@@ -36,10 +36,6 @@ const SessionsView = dynamic(
   () => import("@/components/sessions-view").then((m) => m.SessionsView),
   { loading: () => <SectionLoading /> }
 );
-const ChannelsView = dynamic(
-  () => import("@/components/channels-view").then((m) => m.ChannelsView),
-  { loading: () => <SectionLoading /> }
-);
 const MemoryView = dynamic(
   () => import("@/components/memory-view").then((m) => m.MemoryView),
   { loading: () => <SectionLoading /> }
@@ -143,8 +139,6 @@ export type DashboardSection =
   | "cron"
   | "heartbeat"
   | "sessions"
-  | "channels"
-  | "system"
   | "memory"
   | "docs"
   | "config"
@@ -187,10 +181,6 @@ function SectionContent({ section }: { section: DashboardSection }) {
       return <HeartbeatView />;
     case "sessions":
       return <SessionsView />;
-    case "channels":
-      return <ChannelsView />;
-    case "system":
-      return <ChannelsView />;
     case "memory":
       return <MemoryView />;
     case "docs":

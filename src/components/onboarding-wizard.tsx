@@ -1,1509 +1,857 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
-  AlertCircle,
-  CheckCircle,
-  ChevronDown,
+  Check,
   ChevronRight,
-  ExternalLink,
-  Eye,
-  EyeOff,
-  Search,
+  ChevronLeft,
+  Loader2,
+  Key,
+  Bot,
   ShieldCheck,
-  SkipForward,
-  Star,
+  Clock,
+  MessageCircle,
+  Zap,
 } from "lucide-react";
-import { QrLoginModal } from "@/components/qr-login-modal";
-import { TypingDots } from "@/components/typing-dots";
-import { skipOnboarding } from "@/components/setup-gate";
 import { cn } from "@/lib/utils";
 
-type SetupStatus = {
-  installed: boolean;
-  configured: boolean;
-  configExists: boolean;
-  hasModel: boolean;
-  hasApiKey: boolean;
-  gatewayRunning: boolean;
-  version: string | null;
-  gatewayUrl: string;
-};
+type Model = { id: string; name: string };
 
-type WizardStep = "model" | "channel" | "finishing";
-
-type ProviderId =
-  | "anthropic"
-  | "openai"
-  | "openrouter";
-
-type ChannelId = "telegram" | "discord" | "whatsapp";
-
-type ModelItem = {
-  id: string;
-  name: string;
-};
-
-type ProviderDef = {
-  id: ProviderId;
-  label: string;
-  icon: string;
-  defaultModel: string;
-  placeholder: string;
-  helpUrl: string;
-  helpSteps: string[];
-};
-
-type ChannelDef = {
-  id: ChannelId;
-  label: string;
-  icon: string;
-  setupType: "token" | "qr" | "manual";
-  tokenLabel?: string;
-  tokenPlaceholder?: string;
-  appTokenLabel?: string;
-  appTokenPlaceholder?: string;
-  requiresAppToken?: boolean;
-  description: string;
-  nextSteps: string;
-  docsUrl?: string;
-};
-
-type PairingRequest = {
+type DmRequest = {
   channel: string;
   code: string;
+  senderId?: string;
   senderName?: string;
   message?: string;
+  createdAt?: string;
 };
 
-const PROVIDERS: ProviderDef[] = [
+type Provider = {
+  id: string;
+  label: string;
+  placeholder: string;
+  defaultModelHint: string;
+  logo: React.ReactNode;
+};
+
+const PROVIDERS: Provider[] = [
   {
-    id: "anthropic",
-    label: "Anthropic",
-    icon: "🟣",
-    defaultModel: "anthropic/claude-opus-4-6-20260219",
-    placeholder: "sk-ant-...",
-    helpUrl: "https://console.anthropic.com/settings/keys",
-    helpSteps: [
-      "Open the Anthropic Console.",
-      "Go to Settings, then API Keys.",
-      "Create a new key and paste it here.",
-    ],
+    id: "openrouter",
+    label: "OpenRouter",
+    placeholder: "sk-or-...",
+    defaultModelHint: "claude-sonnet",
+    logo: (
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+        <path d="M2 17l10 5 10-5" />
+        <path d="M2 12l10 5 10-5" />
+      </svg>
+    ),
   },
   {
     id: "openai",
     label: "OpenAI",
-    icon: "🟢",
-    defaultModel: "openai/gpt-5.3",
     placeholder: "sk-...",
-    helpUrl: "https://platform.openai.com/api-keys",
-    helpSteps: [
-      "Open the OpenAI Platform dashboard.",
-      "Go to API Keys.",
-      "Create a new secret key and paste it here.",
-    ],
+    defaultModelHint: "gpt-4",
+    logo: (
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+        <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z" />
+      </svg>
+    ),
   },
   {
-    id: "openrouter",
-    label: "OpenRouter",
-    icon: "🟠",
-    defaultModel: "openrouter/anthropic/claude-opus-4.6",
-    placeholder: "sk-or-...",
-    helpUrl: "https://openrouter.ai/keys",
-    helpSteps: [
-      "Open your OpenRouter dashboard.",
-      "Create a key in the Keys section.",
-      "Paste it here to fetch supported models.",
-    ],
+    id: "anthropic",
+    label: "Anthropic",
+    placeholder: "sk-ant-...",
+    defaultModelHint: "claude-sonnet",
+    logo: (
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+        <path d="M13.827 3.52h3.603L24 20.48h-3.603l-6.57-16.96zm-7.258 0h3.767L16.906 20.48h-3.674l-1.343-3.461H5.017l-1.344 3.46H0l6.569-16.96zm2.327 5.093L6.453 14.58h4.886L8.896 8.613z" />
+      </svg>
+    ),
   },
 ];
 
-const CHANNELS: ChannelDef[] = [
+type Channel = {
+  id: string;
+  label: string;
+  placeholder: string;
+  helpText: string;
+  logo: React.ReactNode;
+};
+
+const CHANNELS: Channel[] = [
   {
     id: "telegram",
     label: "Telegram",
-    icon: "✈️",
-    setupType: "token",
-    tokenLabel: "Bot Token",
-    tokenPlaceholder: "123456:ABC-DEF...",
-    description: "Connect a Telegram bot token to let people message your agent.",
-    nextSteps: "Ask someone to message your Telegram bot so you can approve the first contact.",
-    docsUrl: "https://docs.openclaw.ai/channels/telegram",
+    placeholder: "123456:ABC-DEF...",
+    helpText: "Create a bot via @BotFather on Telegram to get your token.",
+    logo: (
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+        <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+      </svg>
+    ),
   },
   {
     id: "discord",
     label: "Discord",
-    icon: "🎮",
-    setupType: "token",
-    tokenLabel: "Bot Token",
-    tokenPlaceholder: "MTIzNDU2Nzg5...",
-    description: "Connect your Discord bot token to chat in DMs or servers.",
-    nextSteps: "Invite the bot to a server or DM it once so the pairing request appears here.",
-    docsUrl: "https://docs.openclaw.ai/channels/discord",
-  },
-  {
-    id: "whatsapp",
-    label: "WhatsApp",
-    icon: "💬",
-    setupType: "qr",
-    description: "WhatsApp requires a QR code scan from your phone.",
-    nextSteps: "Scan the QR code, then send a message from your phone number to complete pairing.",
-    docsUrl: "https://docs.openclaw.ai/channels/whatsapp",
+    placeholder: "MTA2NjY...",
+    helpText: "Create a bot in the Discord Developer Portal and copy the bot token.",
+    logo: (
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="currentColor">
+        <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
+      </svg>
+    ),
   },
 ];
 
-const STEP_IDS: WizardStep[] = ["model", "channel", "finishing"];
-
-const WELL_KNOWN_MODELS: Record<ProviderId, ModelItem[]> = {
-  anthropic: [
-    { id: "anthropic/claude-opus-4-6-20260219", name: "Claude Opus 4.6" },
-    { id: "anthropic/claude-sonnet-4-6-20260219", name: "Claude Sonnet 4.6" },
-    { id: "anthropic/claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
-    { id: "anthropic/claude-haiku-4-5-20251001", name: "Claude Haiku 4.5" },
-  ],
-  openai: [
-    { id: "openai/gpt-5.3", name: "GPT-5.3" },
-    { id: "openai/gpt-4o", name: "GPT-4o" },
-    { id: "openai/gpt-4o-mini", name: "GPT-4o Mini" },
-    { id: "openai/o3-mini", name: "o3-mini" },
-  ],
-  openrouter: [
-    { id: "openrouter/anthropic/claude-opus-4.6", name: "Claude Opus 4.6" },
-    { id: "openrouter/anthropic/claude-sonnet-4.6", name: "Claude Sonnet 4.6" },
-    { id: "openrouter/openai/gpt-5.3", name: "GPT-5.3" },
-    { id: "openrouter/openai/gpt-4o", name: "GPT-4o" },
-    { id: "openrouter/moonshot/kimi-2.5", name: "Kimi 2.5" },
-    { id: "openrouter/minimax/minimax-m2.5", name: "MiniMax M2.5" },
-    { id: "openrouter/google/gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-  ],
-};
-
-const RECOMMENDED_MODEL_MATCHERS = [
-  "anthropic/claude-opus-4-6",
-  "anthropic/claude-sonnet-4-6",
-  "anthropic/claude-sonnet-4",
-  "openai/gpt-5.3",
-  "openai/gpt-4o",
-  "openrouter/anthropic/claude-opus-4.6",
-  "openrouter/openai/gpt-5.3",
-  "openrouter/moonshot/kimi-2.5",
+// Cycling messages for the gateway start loading state
+const SAVING_STAGES = [
+  { label: "Saving configuration...", threshold: 0 },
+  { label: "Writing config file...", threshold: 10 },
+  { label: "Starting gateway...", threshold: 25 },
+  { label: "Connecting to channel...", threshold: 50 },
+  { label: "Almost ready...", threshold: 80 },
 ];
 
-function isRecommendedModel(modelId: string) {
-  return RECOMMENDED_MODEL_MATCHERS.some(
-    (matcher) => modelId === matcher || modelId.startsWith(`${matcher}-`) || modelId.startsWith(`${matcher}/`),
-  );
-}
+type Props = { onComplete: () => void };
 
-function mergeModels(provider: ProviderId, liveModels: ModelItem[]) {
-  const merged = new Map<string, ModelItem>();
-  for (const model of WELL_KNOWN_MODELS[provider]) merged.set(model.id, model);
-  for (const model of liveModels) merged.set(model.id, model);
-  return Array.from(merged.values()).sort((a, b) => {
-    const aRecommended = isRecommendedModel(a.id) ? 0 : 1;
-    const bRecommended = isRecommendedModel(b.id) ? 0 : 1;
-    if (aRecommended !== bRecommended) return aRecommended - bRecommended;
-    return a.name.localeCompare(b.name);
-  });
-}
+export function OnboardingWizard({ onComplete }: Props) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
 
-function getChannelLabel(channelId: ChannelId | null) {
-  return CHANNELS.find((channel) => channel.id === channelId)?.label || "Channel";
-}
+  // Step 1 state
+  const [provider, setProvider] = useState<string>("openrouter");
+  const [apiKey, setApiKey] = useState("");
+  const [validated, setValidated] = useState(false);
+  const [models, setModels] = useState<Model[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [validating, setValidating] = useState(false);
 
-function OnboardingModelPicker({
-  provider,
-  value,
-  onChange,
-  liveModels,
-  loading,
-}: {
-  provider: ProviderDef;
-  value: string;
-  onChange: (modelId: string) => void;
-  liveModels: ModelItem[];
-  loading: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  // Step 2 state
+  const [selectedChannel, setSelectedChannel] = useState<string>("telegram");
+  const [channelTokens, setChannelTokens] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveProgress, setSaveProgress] = useState(0);
+  const saveProgressRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const models = useMemo(() => mergeModels(provider.id, liveModels), [provider.id, liveModels]);
+  // Step 3 state (pairing)
+  const [pairingRequests, setPairingRequests] = useState<DmRequest[]>([]);
+  const [approving, setApproving] = useState<string | null>(null);
+  const [approved, setApproved] = useState(false);
 
-  const filteredModels = useMemo(() => {
-    if (!query) return models;
-    const q = query.toLowerCase();
-    return models.filter(
-      (model) => model.name.toLowerCase().includes(q) || model.id.toLowerCase().includes(q),
-    );
-  }, [models, query]);
+  const [error, setError] = useState<string | null>(null);
+  const autoValidateRef = useRef<((p: string, key: string) => void) | null>(null);
+
+  const selectedProvider = PROVIDERS.find((p) => p.id === provider)!;
+  const activeChannel = CHANNELS.find((c) => c.id === selectedChannel)!;
+  const activeChannelToken = channelTokens[selectedChannel] || "";
+
+  // ── Step 1: Validate key + fetch models ──
+
+  const validateKey = useCallback(async (providerId: string, key: string) => {
+    if (!key.trim()) return;
+    setValidating(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/onboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "validate-key", provider: providerId, token: key }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setError(data.error ?? "Invalid API key.");
+        setValidating(false);
+        return;
+      }
+      setValidated(true);
+
+      const modelsRes = await fetch("/api/onboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list-models", provider: providerId, token: key }),
+      });
+      const modelsData = await modelsRes.json();
+      if (modelsData.ok && Array.isArray(modelsData.models)) {
+        const list: Model[] = modelsData.models;
+        setModels(list);
+        const hint = PROVIDERS.find((p) => p.id === providerId)?.defaultModelHint ?? "";
+        const defaultModel = list.find((m) => m.id.includes(hint)) ?? list[0];
+        if (defaultModel) setSelectedModel(defaultModel.id);
+      }
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setValidating(false);
+    }
+  }, []);
+
+  const handleValidate = useCallback(() => validateKey(provider, apiKey), [provider, apiKey, validateKey]);
+
+  autoValidateRef.current = validateKey;
+
+  const handleProviderChange = useCallback((newProvider: string) => {
+    setProvider(newProvider);
+    setApiKey("");
+    setValidated(false);
+    setModels([]);
+    setSelectedModel("");
+    setError(null);
+  }, []);
+
+  // ── Step 2: Save config + restart gateway ──
+
+  const handleSaveAndRestart = useCallback(async () => {
+    if (!activeChannelToken.trim()) return;
+    setSaving(true);
+    setSaveProgress(0);
+    setError(null);
+
+    // Animate progress bar over ~25s (gateway can take 15-30s)
+    saveProgressRef.current = setInterval(() => {
+      setSaveProgress((prev) => {
+        // Ease toward 90 then stall — actual completion moves it to 100
+        if (prev >= 90) return prev;
+        const remaining = 90 - prev;
+        return prev + remaining * 0.035;
+      });
+    }, 500);
+
+    try {
+      const res = await fetch("/api/onboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save-and-restart",
+          provider,
+          apiKey,
+          model: selectedModel,
+          telegramToken: channelTokens.telegram || "",
+          discordToken: channelTokens.discord || "",
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setError(data.error ?? "Failed to save configuration.");
+        return;
+      }
+      setSaveProgress(100);
+      setTimeout(() => setStep(3), 300);
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      if (saveProgressRef.current) clearInterval(saveProgressRef.current);
+      setSaving(false);
+    }
+  }, [provider, apiKey, selectedModel, channelTokens, activeChannelToken]);
+
+  // ── Step 3: Poll pairing requests ──
+
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const configuredChannels = CHANNELS.filter((c) => channelTokens[c.id]?.trim());
+
+  const fetchPairing = useCallback(async () => {
+    try {
+      const res = await fetch("/api/pairing");
+      const data = await res.json();
+      const configured = CHANNELS.filter((c) => channelTokens[c.id]?.trim()).map((c) => c.id);
+      const relevantDm = (data.dm || []).filter(
+        (r: DmRequest) => configured.includes(r.channel),
+      );
+      setPairingRequests(relevantDm);
+    } catch {
+      // silent
+    }
+  }, [channelTokens]);
 
   useEffect(() => {
-    if (!open) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
+    if (step !== 3) return;
+    fetchPairing();
+    pollRef.current = setInterval(fetchPairing, 4000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
     };
+  }, [step, fetchPairing]);
 
-    window.addEventListener("mousedown", handlePointerDown);
-    return () => window.removeEventListener("mousedown", handlePointerDown);
-  }, [open]);
+  const handleApprove = useCallback(
+    async (channel: string, code: string) => {
+      setApproving(code);
+      setError(null);
+      try {
+        const res = await fetch("/api/pairing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "approve-dm", channel, code }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          setApproved(true);
+          if (pollRef.current) clearInterval(pollRef.current);
+          setTimeout(() => onComplete(), 1500);
+        } else {
+          setError(data.error || "Approve failed.");
+        }
+      } catch {
+        setError("Network error.");
+      } finally {
+        setApproving(null);
+      }
+    },
+    [onComplete],
+  );
 
-  const selectedModel = models.find((model) => model.id === value);
+  // Derive current saving stage label
+  const currentSavingStage = SAVING_STAGES.filter((s) => saveProgress >= s.threshold).at(-1)!;
 
-  if (loading && liveModels.length === 0) {
-    return (
-      <div className="rounded-lg border border-border bg-background px-3 py-2.5 text-sm text-muted-foreground">
-        <div className="flex items-center gap-2">
-          <TypingDots size="sm" className="text-muted-foreground" />
-          <span>Loading models from {provider.label}...</span>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground/50">
-          You can also pick from the default list below while models load.
-        </p>
-      </div>
-    );
-  }
+  const STEPS = [
+    { n: 1, label: "Model" },
+    { n: 2, label: "Channel" },
+    { n: 3, label: "Pairing" },
+  ] as const;
 
   return (
-    <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        className={cn(
-          "flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm transition-colors",
-          open
-            ? "border-primary/50 bg-background"
-            : "border-border bg-background hover:border-primary/30",
-        )}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="text-base leading-none">{provider.icon}</span>
-          <span className="truncate text-foreground">
-            {selectedModel?.name || value || "Select a model"}
-          </span>
-        </span>
-        <span className="flex items-center gap-2 text-muted-foreground">
-          {loading && <TypingDots size="sm" className="text-muted-foreground" />}
-          <ChevronDown className={cn("h-4 w-4 transition-transform", open && "rotate-180")} />
-        </span>
-      </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/60 dark:bg-black/70 backdrop-blur-sm">
+      <div className="w-full max-w-[460px] mx-4 rounded-2xl border border-stone-200 dark:border-[#23282e] bg-white dark:bg-[#171a1d] shadow-2xl shadow-black/30 overflow-hidden">
 
-      {open && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 overflow-hidden rounded-xl border border-border bg-card shadow-lg">
-          <div className="border-b border-border px-3 py-2">
-            <div className="flex items-center gap-2">
-              <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-              <input
-                type="text"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search models..."
-                className="w-full bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground/40"
-                autoFocus
-              />
-            </div>
-          </div>
-          <div className="max-h-48 overflow-y-auto sm:max-h-56">
-            {filteredModels.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-muted-foreground">
-                No models match your search.
-              </div>
-            ) : (
-              filteredModels.map((model) => {
-                const selected = model.id === value;
-                return (
-                  <button
-                    key={model.id}
-                    type="button"
-                    onClick={() => {
-                      onChange(model.id);
-                      setOpen(false);
-                      setQuery("");
-                    }}
-                    className={cn(
-                      "flex w-full items-center gap-3 px-3 py-2 text-left text-xs transition-colors hover:bg-muted/50",
-                      selected ? "bg-primary/5 text-foreground" : "text-foreground/80",
-                    )}
-                  >
-                    <span className="text-base leading-none">{provider.icon}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium">{model.name}</span>
-                      <span className="block truncate text-muted-foreground">{model.id}</span>
+        {/* Step indicator — top rail */}
+        <div className="px-8 pt-7 pb-5">
+          <div className="flex items-center gap-0">
+            {STEPS.map((s, i) => {
+              const done = s.n < step;
+              const active = s.n === step;
+              return (
+                <div key={s.n} className="flex items-center flex-1 last:flex-none">
+                  {/* Node */}
+                  <div className="flex flex-col items-center gap-1.5">
+                    <div
+                      className={cn(
+                        "flex h-7 w-7 items-center justify-center rounded-full text-xs font-semibold ring-1 transition-all duration-300",
+                        done
+                          ? "bg-emerald-500 dark:bg-emerald-500 text-white ring-emerald-500 dark:ring-emerald-500"
+                          : active
+                            ? "bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 ring-stone-900 dark:ring-stone-100"
+                            : "bg-transparent text-stone-400 dark:text-stone-600 ring-stone-200 dark:ring-[#2e343b]",
+                      )}
+                    >
+                      {done ? <Check className="h-3.5 w-3.5" /> : s.n}
+                    </div>
+                    <span
+                      className={cn(
+                        "text-[10px] font-medium tracking-wide uppercase transition-colors duration-300",
+                        active
+                          ? "text-stone-900 dark:text-[#f5f7fa]"
+                          : done
+                            ? "text-emerald-600 dark:text-emerald-400"
+                            : "text-stone-400 dark:text-stone-600",
+                      )}
+                    >
+                      {s.label}
                     </span>
-                    {isRecommendedModel(model.id) && <Star className="h-3 w-3 text-amber-400" />}
-                    {selected && <CheckCircle className="h-3.5 w-3.5 text-emerald-400" />}
-                  </button>
-                );
-              })
-            )}
+                  </div>
+                  {/* Connector (not after last) */}
+                  {i < STEPS.length - 1 && (
+                    <div className="relative flex-1 mx-2 mb-4">
+                      <div className="h-px w-full bg-stone-200 dark:bg-[#23282e]" />
+                      <div
+                        className="absolute inset-y-0 left-0 h-px bg-emerald-500 dark:bg-emerald-500 transition-all duration-500"
+                        style={{ width: done ? "100%" : "0%" }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
-      )}
+
+        {/* Divider */}
+        <div className="h-px bg-stone-100 dark:bg-[#23282e]" />
+
+        <div className="px-8 py-7">
+          {step === 1 && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 mb-1">
+                  <Key className="h-3.5 w-3.5 text-stone-400 dark:text-[#a8b0ba]" />
+                  <h2 className="text-base font-semibold tracking-tight text-stone-900 dark:text-[#f5f7fa]">
+                    Configure your AI model
+                  </h2>
+                </div>
+                <p className="text-sm text-stone-500 dark:text-[#a8b0ba] leading-relaxed">
+                  Choose a provider, enter your API key, and select a model.
+                </p>
+              </div>
+
+              {/* Provider cards */}
+              <div className="grid grid-cols-3 gap-2">
+                {PROVIDERS.map((p) => {
+                  const isSelected = provider === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleProviderChange(p.id)}
+                      disabled={validating}
+                      className={cn(
+                        "group relative flex flex-col items-center gap-2.5 rounded-xl border px-3 py-4 transition-all duration-200",
+                        isSelected
+                          ? "border-stone-900 dark:border-stone-200/60 bg-stone-900 dark:bg-stone-100/[0.07] text-stone-900 dark:text-[#f5f7fa] shadow-sm"
+                          : "border-stone-200 dark:border-[#23282e] bg-white dark:bg-[#0d1014] text-stone-400 dark:text-[#5a6270] hover:border-stone-300 dark:hover:border-[#343b44] hover:text-stone-700 dark:hover:text-[#a8b0ba] hover:-translate-y-px hover:shadow-sm",
+                        validating && "opacity-50 cursor-not-allowed",
+                      )}
+                    >
+                      {/* Selected indicator dot */}
+                      {isSelected && (
+                        <span className="absolute top-2.5 right-2.5 h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      )}
+                      <span className={cn(
+                        "flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-200",
+                        isSelected
+                          ? "bg-stone-100 dark:bg-white/10 text-stone-900 dark:text-[#f5f7fa]"
+                          : "bg-stone-100 dark:bg-[#1c2128] text-stone-500 dark:text-[#5a6270] group-hover:text-stone-700 dark:group-hover:text-[#a8b0ba]",
+                      )}>
+                        {p.logo}
+                      </span>
+                      <span className={cn(
+                        "text-xs font-medium transition-colors duration-200",
+                        isSelected ? "text-stone-900 dark:text-[#f5f7fa]" : "text-stone-500 dark:text-[#5a6270]",
+                      )}>
+                        {p.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium uppercase tracking-wide text-stone-400 dark:text-[#5a6270]">
+                  {selectedProvider.label} API Key
+                </label>
+                <div className="relative flex items-center gap-2">
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => {
+                      setApiKey(e.target.value);
+                      if (validated) {
+                        setValidated(false);
+                        setModels([]);
+                        setSelectedModel("");
+                      }
+                      setError(null);
+                    }}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData.getData("text").trim();
+                      if (pasted) {
+                        e.preventDefault();
+                        setApiKey(pasted);
+                        setValidated(false);
+                        setModels([]);
+                        setSelectedModel("");
+                        setError(null);
+                        setTimeout(() => autoValidateRef.current?.(provider, pasted), 0);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !validated && !validating && apiKey.trim()) {
+                        handleValidate();
+                      }
+                    }}
+                    placeholder={selectedProvider.placeholder}
+                    disabled={validating}
+                    className="flex-1 rounded-lg px-3 py-2.5 text-sm bg-white dark:bg-[#0d1014] border border-stone-200 dark:border-[#23282e] text-stone-900 dark:text-[#f5f7fa] placeholder:text-stone-300 dark:placeholder:text-[#3a424c] focus:outline-none focus:ring-2 focus:ring-stone-400/40 dark:focus:ring-stone-500/30 focus:border-stone-400 dark:focus:border-stone-500 disabled:opacity-50 transition-all duration-200"
+                  />
+                  {/* Inline validation pill — only rendered when there is content */}
+                  {(validating || validated) && (
+                    <div
+                      className={cn(
+                        "flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all duration-300",
+                        validating
+                          ? "bg-stone-100 dark:bg-[#1c2128] text-stone-500 dark:text-[#a8b0ba]"
+                          : "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 ring-1 ring-emerald-200 dark:ring-emerald-500/20",
+                      )}
+                    >
+                      {validating ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3" />
+                      )}
+                      {validating ? "Checking" : "Verified"}
+                    </div>
+                  )}
+                </div>
+                {error && (
+                  <p className="flex items-center gap-1.5 text-xs text-red-500 dark:text-red-400 mt-1">
+                    <span className="inline-block h-1 w-1 rounded-full bg-red-500 dark:bg-red-400 shrink-0" />
+                    {error}
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium uppercase tracking-wide text-stone-400 dark:text-[#5a6270]">
+                  Model
+                </label>
+                <select
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
+                  disabled={!validated || models.length === 0}
+                  className="w-full rounded-lg px-3 py-2.5 text-sm bg-white dark:bg-[#0d1014] border border-stone-200 dark:border-[#23282e] text-stone-900 dark:text-[#f5f7fa] focus:outline-none focus:ring-2 focus:ring-stone-400/40 dark:focus:ring-stone-500/30 focus:border-stone-400 dark:focus:border-stone-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200 appearance-none"
+                >
+                  {models.length === 0 ? (
+                    <option value="">Validate your API key first</option>
+                  ) : (
+                    models.map((m) => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  onClick={() => { setError(null); setStep(2); }}
+                  disabled={!validated || !selectedModel}
+                  className="flex items-center gap-1.5 rounded-lg px-5 py-2.5 text-sm font-medium bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 hover:bg-stone-700 dark:hover:bg-stone-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 mb-1">
+                  <Bot className="h-3.5 w-3.5 text-stone-400 dark:text-[#a8b0ba]" />
+                  <h2 className="text-base font-semibold tracking-tight text-stone-900 dark:text-[#f5f7fa]">
+                    Connect a channel
+                  </h2>
+                </div>
+                <p className="text-sm text-stone-500 dark:text-[#a8b0ba] leading-relaxed">
+                  Choose a messaging platform and enter your bot token.
+                </p>
+              </div>
+
+              {/* Channel cards */}
+              <div className="grid grid-cols-2 gap-2">
+                {CHANNELS.map((c) => {
+                  const isSelected = selectedChannel === c.id;
+                  const hasToken = !!channelTokens[c.id]?.trim();
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => { setSelectedChannel(c.id); setError(null); }}
+                      disabled={saving}
+                      className={cn(
+                        "group relative flex items-center gap-3 rounded-xl border px-4 py-3.5 transition-all duration-200 text-left",
+                        isSelected
+                          ? "border-stone-900 dark:border-stone-200/60 bg-stone-900 dark:bg-stone-100/[0.07] shadow-sm"
+                          : "border-stone-200 dark:border-[#23282e] bg-white dark:bg-[#0d1014] hover:border-stone-300 dark:hover:border-[#343b44] hover:-translate-y-px hover:shadow-sm",
+                        saving && "opacity-50 cursor-not-allowed",
+                      )}
+                    >
+                      <span className={cn(
+                        "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors duration-200",
+                        isSelected
+                          ? "bg-stone-100 dark:bg-white/10 text-stone-900 dark:text-[#f5f7fa]"
+                          : "bg-stone-100 dark:bg-[#1c2128] text-stone-500 dark:text-[#5a6270] group-hover:text-stone-700 dark:group-hover:text-[#a8b0ba]",
+                      )}>
+                        {c.logo}
+                      </span>
+                      <span className={cn(
+                        "text-sm font-medium transition-colors duration-200",
+                        isSelected ? "text-white dark:text-[#f5f7fa]" : "text-stone-600 dark:text-[#a8b0ba]",
+                      )}>
+                        {c.label}
+                      </span>
+                      {hasToken && (
+                        <span className="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 dark:bg-emerald-500/20">
+                          <Check className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium uppercase tracking-wide text-stone-400 dark:text-[#5a6270]">
+                  {activeChannel.label} Bot Token
+                </label>
+                <input
+                  type="password"
+                  value={activeChannelToken}
+                  onChange={(e) => {
+                    setChannelTokens((prev) => ({ ...prev, [selectedChannel]: e.target.value }));
+                    setError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && activeChannelToken.trim() && !saving) {
+                      handleSaveAndRestart();
+                    }
+                  }}
+                  placeholder={activeChannel.placeholder}
+                  disabled={saving}
+                  className="w-full rounded-lg px-3 py-2.5 text-sm bg-white dark:bg-[#0d1014] border border-stone-200 dark:border-[#23282e] text-stone-900 dark:text-[#f5f7fa] placeholder:text-stone-300 dark:placeholder:text-[#3a424c] focus:outline-none focus:ring-2 focus:ring-stone-400/40 dark:focus:ring-stone-500/30 focus:border-stone-400 dark:focus:border-stone-500 disabled:opacity-50 transition-all duration-200"
+                />
+                <p className="text-xs text-stone-400 dark:text-[#5a6270] leading-relaxed">
+                  {activeChannel.helpText}
+                </p>
+                {error && (
+                  <p className="flex items-center gap-1.5 text-xs text-red-500 dark:text-red-400">
+                    <span className="inline-block h-1 w-1 rounded-full bg-red-500 dark:bg-red-400 shrink-0" />
+                    {error}
+                  </p>
+                )}
+              </div>
+
+              {/* Progress bar — visible only while saving */}
+              {saving && (
+                <div className="space-y-2 animate-in fade-in duration-300">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-stone-500 dark:text-[#a8b0ba] transition-all duration-500">
+                      {currentSavingStage.label}
+                    </span>
+                    <span className="text-xs tabular-nums text-stone-400 dark:text-[#5a6270]">
+                      {Math.round(saveProgress)}%
+                    </span>
+                  </div>
+                  <div className="h-1 w-full overflow-hidden rounded-full bg-stone-100 dark:bg-[#23282e]">
+                    <div
+                      className="h-full rounded-full bg-stone-900 dark:bg-stone-200 transition-all duration-500 ease-out"
+                      style={{ width: `${saveProgress}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-stone-400 dark:text-[#5a6270]">
+                    Gateway startup can take up to 30s &mdash; hang tight.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-1">
+                <button
+                  onClick={() => { setError(null); setStep(1); }}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 rounded-lg px-4 py-2.5 text-sm font-medium text-stone-500 dark:text-[#a8b0ba] hover:bg-stone-100 dark:hover:bg-[#1c2128] disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-200"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Back
+                </button>
+                <button
+                  onClick={handleSaveAndRestart}
+                  disabled={!activeChannelToken.trim() || saving}
+                  className="flex items-center gap-1.5 rounded-lg px-5 py-2.5 text-sm font-medium bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 hover:bg-stone-700 dark:hover:bg-stone-200 disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 shadow-sm"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Starting...
+                    </>
+                  ) : (
+                    <>
+                      Save & Continue
+                      <ChevronRight className="h-4 w-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && (
+            <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2 mb-1">
+                  <ShieldCheck className="h-3.5 w-3.5 text-stone-400 dark:text-[#a8b0ba]" />
+                  <h2 className="text-base font-semibold tracking-tight text-stone-900 dark:text-[#f5f7fa]">
+                    Pair your account
+                  </h2>
+                </div>
+                <p className="text-sm text-stone-500 dark:text-[#a8b0ba] leading-relaxed">
+                  Send any message to your bot on{" "}
+                  <span className="text-stone-700 dark:text-[#d4dae2] font-medium">
+                    {configuredChannels.map((c) => c.label).join(" or ")}
+                  </span>
+                  , then approve the request below.
+                </p>
+              </div>
+
+              {approved ? (
+                <div className="flex flex-col items-center gap-3 py-8 animate-in fade-in duration-300">
+                  <div className="relative flex h-14 w-14 items-center justify-center">
+                    <span className="absolute inset-0 rounded-full bg-emerald-500/15 dark:bg-emerald-500/10 animate-ping" />
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/15 ring-1 ring-emerald-200 dark:ring-emerald-500/20">
+                      <Check className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+                    </div>
+                  </div>
+                  <div className="text-center space-y-0.5">
+                    <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                      Pairing approved
+                    </p>
+                    <p className="text-xs text-stone-400 dark:text-[#5a6270]">
+                      Finishing setup...
+                    </p>
+                  </div>
+                </div>
+              ) : pairingRequests.length === 0 ? (
+                <PairingWaitState configuredChannels={configuredChannels} />
+              ) : (
+                <div className="space-y-2">
+                  {pairingRequests.map((req) => (
+                    <div
+                      key={req.code}
+                      className="rounded-xl border border-stone-200 dark:border-[#23282e] bg-stone-50 dark:bg-[#0d1014] p-4 animate-in fade-in duration-200"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-sky-200 dark:border-sky-500/20 bg-sky-50 dark:bg-sky-500/10">
+                          <MessageCircle className="h-4 w-4 text-sky-500 dark:text-sky-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-stone-800 dark:text-[#f5f7fa] capitalize">
+                              {req.channel}
+                            </span>
+                            <span className="rounded-full bg-stone-100 dark:bg-[#23282e] px-1.5 py-0.5 text-[10px] text-stone-500 dark:text-[#a8b0ba]">
+                              DM pairing
+                            </span>
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                            <code className="rounded-md bg-violet-500/10 dark:bg-violet-500/15 px-2 py-0.5 text-xs font-bold tracking-widest text-violet-600 dark:text-violet-300 ring-1 ring-violet-200 dark:ring-violet-500/20">
+                              {req.code}
+                            </code>
+                            {req.senderName && (
+                              <span className="text-xs text-stone-500 dark:text-[#a8b0ba]">
+                                from {req.senderName}
+                              </span>
+                            )}
+                            {!req.senderName && req.senderId && (
+                              <span className="text-xs text-stone-500 dark:text-[#a8b0ba]">
+                                ID: {req.senderId}
+                              </span>
+                            )}
+                          </div>
+                          {req.message && (
+                            <p className="mt-1.5 line-clamp-1 text-xs text-stone-400 dark:text-[#5a6270] italic">
+                              &ldquo;{req.message}&rdquo;
+                            </p>
+                          )}
+                          {req.createdAt && (
+                            <span className="mt-1 flex items-center gap-1 text-[10px] text-stone-400 dark:text-[#5a6270]">
+                              <Clock className="h-2.5 w-2.5" />
+                              {formatTimeAgo(req.createdAt)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleApprove(req.channel, req.code)}
+                        disabled={approving !== null}
+                        className="mt-3.5 flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-600 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-500 disabled:opacity-50"
+                      >
+                        {approving === req.code ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                        )}
+                        Approve pairing
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {error && (
+                <p className="flex items-center justify-center gap-1.5 text-xs text-red-500 dark:text-red-400">
+                  <span className="inline-block h-1 w-1 rounded-full bg-red-500 dark:bg-red-400 shrink-0" />
+                  {error}
+                </p>
+              )}
+
+              {!approved && (
+                <p className="text-center text-[11px] text-stone-400 dark:text-[#3a424c]">
+                  Polling every 4s &middot; Codes expire after 1 hour
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
 
-export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
-  const router = useRouter();
+// ── Pairing wait state — extracted for clarity ──
 
-  const [status, setStatus] = useState<SetupStatus | null>(null);
-  const [step, setStep] = useState<WizardStep>("model");
+function PairingWaitState({ configuredChannels }: { configuredChannels: Channel[] }) {
+  const [scanLine, setScanLine] = useState(0);
 
-  const [provider, setProvider] = useState<ProviderId>("anthropic");
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [model, setModel] = useState(PROVIDERS[0].defaultModel);
-  const [testingKey, setTestingKey] = useState(false);
-  const [keyValid, setKeyValid] = useState<boolean | null>(null);
-  const [keyError, setKeyError] = useState<string | null>(null);
-  const [liveModels, setLiveModels] = useState<ModelItem[]>([]);
-  const [loadingModels, setLoadingModels] = useState(false);
-
-  const [selectedChannel, setSelectedChannel] = useState<ChannelId | null>(null);
-  const [channelToken, setChannelToken] = useState("");
-  const [channelAppToken, setChannelAppToken] = useState("");
-  const [channelBusy, setChannelBusy] = useState(false);
-  const [channelResult, setChannelResult] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [connectedChannel, setConnectedChannel] = useState<ChannelId | null>(null);
-  const [showQrModal, setShowQrModal] = useState(false);
-  const [qrChannel, setQrChannel] = useState<"whatsapp">("whatsapp");
-
-  const [pairingRequests, setPairingRequests] = useState<PairingRequest[]>([]);
-  const [approvingCode, setApprovingCode] = useState<string | null>(null);
-  const [approvedCodes, setApprovedCodes] = useState<Set<string>>(new Set());
-  const [connectPhase, setConnectPhase] = useState<
-    "idle" | "validating" | "saving" | "restarting" | "ready"
-  >("idle");
-  const [botName, setBotName] = useState("");
-  const [botUsername, setBotUsername] = useState("");
-  const [pairingTimeout, setPairingTimeout] = useState(false);
-  const [pairingError, setPairingError] = useState<string | null>(null);
-  // healthProgress removed — no meaningful way to measure gateway startup
-
-  const [launchError, setLaunchError] = useState<string | null>(null);
-  const [showSkipConfirm, setShowSkipConfirm] = useState(false);
-
-  const validateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const validationSeqRef = useRef(0);
-  const modelFetchSeqRef = useRef(0);
-  const pairingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pairingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const connectAbortRef = useRef<AbortController | null>(null);
-
-  const currentProvider = useMemo(
-    () => PROVIDERS.find((entry) => entry.id === provider) || PROVIDERS[0],
-    [provider],
-  );
-  const currentChannel = useMemo(
-    () => CHANNELS.find((entry) => entry.id === selectedChannel) || null,
-    [selectedChannel],
-  );
-  const connectedChannelDef = useMemo(
-    () => CHANNELS.find((entry) => entry.id === connectedChannel) || null,
-    [connectedChannel],
-  );
-
+  // Animate a vertical scan line across the icon area
   useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const res = await fetch("/api/onboard", { cache: "no-store" });
-        if (!res.ok) return;
-        const data = (await res.json()) as SetupStatus;
-        if (!cancelled) setStatus(data);
-      } catch {
-        // Silent: the gate is fail-open, and the wizard can still render.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    const id = setInterval(() => {
+      setScanLine((prev) => (prev + 1) % 4);
+    }, 800);
+    return () => clearInterval(id);
   }, []);
-
-  const [modelFetchError, setModelFetchError] = useState(false);
-
-  const fetchLiveModels = useCallback(async (nextProvider: ProviderId, token: string) => {
-    const seq = ++modelFetchSeqRef.current;
-    setLoadingModels(true);
-    setModelFetchError(false);
-
-    try {
-      const res = await fetch("/api/onboard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list-models", provider: nextProvider, token }),
-        signal: AbortSignal.timeout(20000),
-      });
-      const data = await res.json();
-      if (seq !== modelFetchSeqRef.current) return;
-      if (data.ok && Array.isArray(data.models)) {
-        setLiveModels(data.models as ModelItem[]);
-      } else {
-        setLiveModels([]);
-      }
-    } catch {
-      if (seq === modelFetchSeqRef.current) {
-        setLiveModels([]);
-        setModelFetchError(true);
-      }
-    } finally {
-      if (seq === modelFetchSeqRef.current) {
-        setLoadingModels(false);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (validateTimerRef.current) clearTimeout(validateTimerRef.current);
-    const seq = ++validationSeqRef.current;
-    modelFetchSeqRef.current += 1;
-
-    setTestingKey(false);
-    setKeyValid(null);
-    setKeyError(null);
-    setLiveModels([]);
-    setLoadingModels(false);
-
-    // Validate API key
-    if (apiKey.trim().length < 8) return;
-
-    validateTimerRef.current = setTimeout(async () => {
-      setTestingKey(true);
-      try {
-        const res = await fetch("/api/onboard", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "test-key", provider, token: apiKey.trim() }),
-          signal: AbortSignal.timeout(15000),
-        });
-        if (!res.ok) throw new Error(`Validation failed (${res.status})`);
-        const data = await res.json();
-        if (seq !== validationSeqRef.current) return;
-
-        if (data.ok) {
-          setKeyValid(true);
-          setKeyError(null);
-          await fetchLiveModels(provider, apiKey.trim());
-        } else {
-          setKeyValid(false);
-          setKeyError(data.error || "Key validation failed.");
-        }
-      } catch (error) {
-        if (seq !== validationSeqRef.current) return;
-        setKeyValid(false);
-        setKeyError(error instanceof Error ? error.message : "Key validation failed.");
-      } finally {
-        if (seq === validationSeqRef.current) {
-          setTestingKey(false);
-        }
-      }
-    }, 600);
-
-    return () => {
-      if (validateTimerRef.current) clearTimeout(validateTimerRef.current);
-    };
-  }, [apiKey, fetchLiveModels, provider]);
-
-  useEffect(() => {
-    if (!connectedChannel) {
-      if (pairingPollRef.current) clearInterval(pairingPollRef.current);
-      pairingPollRef.current = null;
-      return;
-    }
-
-    const controller = new AbortController();
-
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/pairing", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]) });
-        if (!res.ok) return;
-        const data = await res.json();
-        const nextRequests = Array.isArray(data.dm)
-          ? (data.dm as PairingRequest[]).filter((request) => request.channel === connectedChannel)
-          : [];
-        setPairingRequests(nextRequests);
-      } catch {
-        // Silent polling failure (includes abort).
-      }
-    };
-
-    poll();
-    pairingPollRef.current = setInterval(() => {
-      if (document.visibilityState === "visible") void poll();
-    }, 4000);
-
-    return () => {
-      controller.abort();
-      if (pairingPollRef.current) clearInterval(pairingPollRef.current);
-      pairingPollRef.current = null;
-    };
-  }, [connectedChannel]);
-
-  // Cleanup pairing timeout timer on unmount (Bug 6)
-  useEffect(() => {
-    return () => {
-      if (pairingTimeoutRef.current) clearTimeout(pairingTimeoutRef.current);
-    };
-  }, []);
-
-  const handleProviderChange = useCallback((nextProvider: ProviderId) => {
-    const nextDef = PROVIDERS.find((entry) => entry.id === nextProvider) || PROVIDERS[0];
-    validationSeqRef.current += 1;
-    modelFetchSeqRef.current += 1;
-    setProvider(nextProvider);
-    setModel(nextDef.defaultModel);
-    setApiKey("");
-    setShowKey(false);
-    setKeyValid(null);
-    setKeyError(null);
-    setLiveModels([]);
-    setLoadingModels(false);
-  }, []);
-
-  const saveCredentials = useCallback(async () => {
-    const payload: Record<string, string> = {
-      action: "save-credentials",
-      provider,
-      apiKey: apiKey.trim(),
-      model,
-    };
-    const res = await fetch("/api/onboard", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) {
-      throw new Error(data.error || "Could not save your API credentials.");
-    }
-  }, [apiKey, model, provider]);
-
-  const continueToChannelStep = useCallback(async () => {
-    try {
-      await saveCredentials();
-      setStep("channel");
-    } catch (error) {
-      setKeyError(error instanceof Error ? error.message : "Could not save your API credentials.");
-      setKeyValid(false);
-    }
-  }, [saveCredentials]);
-
-  const waitForGatewayHealth = useCallback(async (channel?: string, maxAttempts = 30): Promise<boolean> => {
-    const url = channel ? `/api/channels/health?channel=${encodeURIComponent(channel)}` : "/api/channels/health";
-    for (let i = 0; i < maxAttempts; i++) {
-      try {
-        const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(5000) });
-        if (res.ok) {
-          const data = await res.json();
-          // If checking a specific channel, wait until it's ready
-          if (channel && data.channelReady === false) {
-            // Gateway is up but channel not ready yet — keep polling
-          } else {
-            return true;
-          }
-        }
-      } catch { /* retry */ }
-      await new Promise((r) => setTimeout(r, 2000));
-    }
-    return false;
-  }, []);
-
-  const cancelChannelConnect = useCallback(() => {
-    connectAbortRef.current?.abort();
-    connectAbortRef.current = null;
-    setChannelBusy(false);
-    setConnectPhase("idle");
-    setChannelResult(null);
-  }, []);
-
-  const handleConnectChannel = useCallback(async () => {
-    if (!currentChannel || currentChannel.setupType !== "token" || !channelToken.trim()) return;
-    if (currentChannel.requiresAppToken && !channelAppToken.trim()) return;
-
-    const abort = new AbortController();
-    connectAbortRef.current = abort;
-
-    setChannelBusy(true);
-    setChannelResult(null);
-    setConnectPhase("validating");
-    setBotName("");
-    setPairingTimeout(false);
-    if (pairingTimeoutRef.current) clearTimeout(pairingTimeoutRef.current);
-
-    try {
-      // Phase 1: Validate token
-      const valRes = await fetch("/api/channels/validate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ channel: currentChannel.id, token: channelToken.trim() }),
-        signal: abort.signal,
-      });
-      if (!valRes.ok) {
-        const errBody = await valRes.json().catch(() => ({}));
-        throw new Error((errBody as Record<string, string>).error || `Validation failed (${valRes.status})`);
-      }
-      const valData = await valRes.json();
-      if (valData.ok === false) {
-        throw new Error(valData.error || "Token validation failed.");
-      }
-      if (valData.botName) setBotName(valData.botName);
-      if (valData.botUsername) setBotUsername(valData.botUsername);
-
-      if (abort.signal.aborted) return;
-
-      // Phase 2: Save config via CLI (writes to disk, no gateway restart dance)
-      setConnectPhase("saving");
-      const res = await fetch("/api/channels", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "connect",
-          channel: currentChannel.id,
-          token: channelToken.trim(),
-          ...(currentChannel.requiresAppToken ? { appToken: channelAppToken.trim() } : {}),
-        }),
-        signal: abort.signal,
-      });
-      const data = await res.json();
-      if (!res.ok || data.ok === false) {
-        throw new Error(data.error || `Could not connect ${currentChannel.label}.`);
-      }
-
-      if (abort.signal.aborted) return;
-
-      setConnectPhase("ready");
-      setChannelResult({
-        type: "success",
-        message: `${currentChannel.label} connected${valData.botName ? ` (${valData.botName})` : ""}!`,
-      });
-      setConnectedChannel(currentChannel.id);
-      setApprovedCodes(new Set());
-      setPairingRequests([]);
-
-      // Start 2-minute pairing timeout
-      pairingTimeoutRef.current = setTimeout(() => {
-        setPairingTimeout(true);
-      }, 120000);
-    } catch (error) {
-      if (abort.signal.aborted) return;
-      setConnectPhase("idle");
-      setChannelResult({
-        type: "error",
-        message: error instanceof Error ? error.message : `Could not connect ${currentChannel.label}.`,
-      });
-    } finally {
-      if (!abort.signal.aborted) setChannelBusy(false);
-      connectAbortRef.current = null;
-    }
-  }, [channelAppToken, channelToken, currentChannel]);
-
-  const handleApprovePairing = useCallback(async (request: PairingRequest) => {
-    // Idempotency guard: skip if already approved or in-flight
-    if (approvedCodes.has(request.code) || approvingCode) return;
-    setApprovingCode(request.code);
-    setPairingError(null);
-    try {
-      const res = await fetch("/api/pairing", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "approve-dm", channel: request.channel, code: request.code }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        throw new Error(data.error || "Could not approve the pairing request.");
-      }
-      setApprovedCodes((prev) => {
-        const next = new Set(prev);
-        next.add(request.code);
-        return next;
-      });
-    } catch (err) {
-      setPairingError(err instanceof Error ? err.message : "Could not approve. Check your connection and try again.");
-    } finally {
-      setApprovingCode(null);
-    }
-  }, [approvedCodes, approvingCode]);
-
-  const runQuickSetup = useCallback(async () => {
-    setLaunchError(null);
-
-    try {
-      const payload: Record<string, string> = {
-        action: "quick-setup",
-        provider,
-        apiKey: apiKey.trim(),
-        model,
-      };
-      const res = await fetch("/api/onboard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
-        throw new Error(data.error || "Setup failed.");
-      }
-      onComplete?.();
-      if (process.env.NEXT_PUBLIC_AGENTBAY_HOSTED === "true") {
-        try { localStorage.setItem("mc-post-onboarding", "1"); } catch {}
-        router.push("/chat");
-      } else {
-        router.push("/");
-      }
-    } catch (error) {
-      setLaunchError(error instanceof Error ? error.message : "Setup failed.");
-    }
-  }, [apiKey, model, onComplete, provider, router]);
-
-  const finishSetup = useCallback(() => {
-    setStep("finishing");
-    void runQuickSetup();
-  }, [runQuickSetup]);
-
-  const visibleStepIndex = step === "model" ? 0 : step === "channel" ? 1 : 2;
-  const continueDisabled = !apiKey.trim() || testingKey || keyValid !== true || status?.installed === false;
-  const onboardingBlocked = status?.installed === false;
-  const approvalComplete = approvedCodes.size > 0;
 
   return (
-    <>
-      <div className="fixed inset-0 z-50 flex flex-col items-center overflow-y-auto bg-background px-4 py-6 sm:justify-center sm:py-8">
-        <div className="flex w-full max-w-2xl flex-col items-center">
-          <div className="mb-6 text-center sm:mb-8">
-            <h1 className="font-serif text-2xl font-bold tracking-tight text-foreground">
-              Set up your agent
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">This only takes a minute.</p>
-          </div>
-
-          <div className="mb-6 flex items-center justify-center gap-2 sm:mb-6">
-            {STEP_IDS.map((stepId, index) => {
-              const isCurrent = index === visibleStepIndex;
-              const isPast = index < visibleStepIndex;
-
-              if (isCurrent) {
-                return <span key={stepId} className="h-1.5 w-6 rounded-full bg-foreground transition-all duration-300" />;
-              }
-
-              if (isPast) {
-                // Don't allow navigating back during finishing step
-                if (step === "finishing") {
-                  return <span key={stepId} className="h-1.5 w-1.5 rounded-full bg-foreground/40 transition-all duration-300" />;
-                }
-                return (
-                  <button
-                    key={stepId}
-                    type="button"
-                    onClick={() => setStep(stepId)}
-                    className="h-1.5 w-1.5 cursor-pointer rounded-full bg-foreground/40 transition-all duration-300"
-                    aria-label={`Go back to ${stepId}`}
-                  />
-                );
-              }
-
-              return <span key={stepId} className="h-1.5 w-1.5 rounded-full bg-foreground/10 transition-all duration-300" />;
-            })}
-          </div>
-          {step !== "finishing" && (
-            <p className="mb-4 text-center text-xs text-muted-foreground/40">
-              Step {visibleStepIndex + 1} of {STEP_IDS.length}
-            </p>
-          )}
-
-          {onboardingBlocked && (
-            <div className="mb-4 w-full rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-xs text-red-400 space-y-2">
-              <p>OpenClaw is not installed yet. Install it first, then refresh this page.</p>
-              <button
-                type="button"
-                onClick={() => window.location.reload()}
-                className="rounded-full border border-red-500/30 px-3 py-1 text-xs text-red-300 transition-colors hover:bg-red-500/10"
-              >
-                Refresh and retry
-              </button>
-            </div>
-          )}
-
-          <div className="w-full rounded-2xl border border-border bg-card shadow-[0_20px_60px_rgba(0,0,0,0.06)]">
-            <div className="p-5 sm:p-7">
-              {step === "model" && (
-                <div className="space-y-6">
-                  <div>
-                    <h2 className="text-sm font-semibold text-foreground">Connect your AI</h2>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Choose a provider, verify your API key, and pick the default model for your agent.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap gap-2">
-                      {PROVIDERS.map((entry) => {
-                        const selected = entry.id === provider;
-                        return (
-                          <button
-                            key={entry.id}
-                            type="button"
-                            onClick={() => handleProviderChange(entry.id)}
-                            className={cn(
-                              "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-                              selected
-                                ? "border-primary bg-primary/10 text-foreground"
-                                : "border-border bg-card text-muted-foreground hover:border-foreground/15 hover:text-foreground",
-                            )}
-                          >
-                            {entry.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-secondary/50 p-3 space-y-1.5">
-                    <p className="text-xs font-medium text-foreground/80">
-                      How to get your {currentProvider.label} API key
-                    </p>
-                    <ol className="list-decimal list-inside space-y-1 text-xs leading-relaxed text-muted-foreground">
-                      {currentProvider.helpSteps.map((stepText, index) => (
-                        <li key={`${currentProvider.id}-help-${index}`}>{stepText}</li>
-                      ))}
-                    </ol>
-                    {currentProvider.helpUrl ? (
-                      <a
-                        href={currentProvider.helpUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-medium text-blue-600 transition-colors hover:underline dark:text-blue-400"
-                      >
-                        Open {currentProvider.label} Dashboard
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        API Key
-                      </label>
-                      <div className="group relative inline-flex items-center">
-                        <ShieldCheck className="h-3 w-3 text-emerald-500/60" />
-                        <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 rounded-lg bg-foreground px-3 py-1.5 text-xs text-background opacity-0 transition-opacity group-hover:opacity-100">
-                          Stored securely on this machine. Never sent to external servers.
-                        </div>
-                      </div>
-                    </div>
-                    <div className="relative">
-                      <input
-                        type={showKey ? "text" : "password"}
-                        value={apiKey}
-                        onChange={(event) => setApiKey(event.target.value)}
-                        placeholder={currentProvider.placeholder}
-                        autoComplete="off"
-                        data-1p-ignore
-                        data-lpignore="true"
-                        data-form-type="other"
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 pr-16 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary/50"
-                      />
-                      <div className="absolute right-2.5 top-1/2 flex -translate-y-1/2 items-center gap-2">
-                        {testingKey ? <TypingDots size="sm" className="text-muted-foreground" /> : null}
-                        {!testingKey && keyValid === true ? <CheckCircle className="h-3.5 w-3.5 text-emerald-400" /> : null}
-                        {!testingKey && keyValid === false ? <AlertCircle className="h-3.5 w-3.5 text-red-400" /> : null}
-                        <button
-                          type="button"
-                          onClick={() => setShowKey((prev) => !prev)}
-                          className="text-muted-foreground/50 transition-colors hover:text-foreground"
-                          aria-label={showKey ? "Hide API key" : "Show API key"}
-                        >
-                          {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </button>
-                      </div>
-                    </div>
-                    {keyValid === true && !testingKey ? (
-                      <p className="text-xs text-emerald-400">Key is valid</p>
-                    ) : null}
-                    {keyValid === false && keyError ? (
-                      <p className="text-xs text-red-400">{keyError}</p>
-                    ) : null}
-                    {apiKey.trim().length > 0 && apiKey.trim().length < 8 && !testingKey && keyValid === null ? (
-                      <p className="break-words text-xs text-muted-foreground/50">
-                        Keep typing — API keys are usually longer
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-muted-foreground">Model</label>
-                    <OnboardingModelPicker
-                      key={currentProvider.id}
-                      provider={currentProvider}
-                      value={model}
-                      onChange={setModel}
-                      liveModels={liveModels}
-                      loading={loadingModels}
-                    />
-                    {modelFetchError && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (keyValid && apiKey.trim()) void fetchLiveModels(provider, apiKey.trim());
-                        }}
-                        className="text-xs text-amber-400 transition-colors hover:text-amber-300"
-                      >
-                        Could not load models from provider — using defaults. Click to retry.
-                      </button>
-                    )}
-                    <p className="text-xs text-muted-foreground/50">
-                      You can change this later in the Models section.
-                    </p>
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="button"
-                      onClick={continueToChannelStep}
-                      disabled={continueDisabled || onboardingBlocked}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full px-5 py-2.5 text-sm font-medium transition-opacity",
-                        continueDisabled || onboardingBlocked
-                          ? "cursor-not-allowed bg-muted text-muted-foreground"
-                          : "bg-primary text-primary-foreground hover:opacity-90",
-                      )}
-                    >
-                      Save &amp; Continue
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {step === "channel" && !connectedChannel && (
-                <div className="space-y-6">
-                  <div>
-                    <h2 className="text-sm font-semibold text-foreground">Add messaging</h2>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Connect a channel so your agent can chat. You can skip this for now.
-                    </p>
-                    {/* Gateway-not-running warning removed — the onboarding flow
-                        starts the gateway automatically during quick-setup, so this
-                        warning was either stale or alarming for no reason. */}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {CHANNELS.map((channel) => {
-                      const selected = channel.id === selectedChannel;
-                      return (
-                        <button
-                          key={channel.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedChannel(channel.id);
-                            setChannelToken("");
-                            setChannelAppToken("");
-                            setChannelResult(null);
-                          }}
-                          className={cn(
-                            "flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-colors",
-                            selected
-                              ? "border-primary bg-primary/5"
-                              : "border-border bg-card hover:border-foreground/15",
-                          )}
-                        >
-                          <span className="text-lg">{channel.icon}</span>
-                          <span className="text-xs font-medium text-foreground/80">{channel.label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {currentChannel?.setupType === "token" && (
-                    <div className="space-y-3">
-                      <p className="text-xs text-muted-foreground">{currentChannel.description}</p>
-                      <label className="text-xs font-medium text-muted-foreground">{currentChannel.tokenLabel}</label>
-                      <input
-                        type="password"
-                        value={channelToken}
-                        onChange={(event) => setChannelToken(event.target.value)}
-                        placeholder={currentChannel.tokenPlaceholder}
-                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary/50"
-                      />
-                      {currentChannel.requiresAppToken && (
-                        <div className="space-y-1.5">
-                          <label className="text-xs font-medium text-muted-foreground">
-                            {currentChannel.appTokenLabel || "App Token"}
-                          </label>
-                          <input
-                            type="password"
-                            value={channelAppToken}
-                            onChange={(event) => setChannelAppToken(event.target.value)}
-                            placeholder={currentChannel.appTokenPlaceholder || "xapp-..."}
-                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-primary/50"
-                          />
-                        </div>
-                      )}
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        {currentChannel.docsUrl ? (
-                          <a
-                            href={currentChannel.docsUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-                          >
-                            Open setup guide
-                          </a>
-                        ) : (
-                          <span />
-                        )}
-                        <button
-                          type="button"
-                          onClick={handleConnectChannel}
-                          disabled={
-                            !channelToken.trim() ||
-                            (currentChannel.requiresAppToken && !channelAppToken.trim()) ||
-                            channelBusy
-                          }
-                          className={cn(
-                            "inline-flex min-w-[6rem] items-center justify-center rounded-full px-4 py-2 text-xs font-medium",
-                            !channelToken.trim() ||
-                              (currentChannel.requiresAppToken && !channelAppToken.trim()) ||
-                              channelBusy
-                              ? "cursor-not-allowed bg-muted text-muted-foreground"
-                              : "bg-primary text-primary-foreground hover:opacity-90",
-                          )}
-                        >
-                          {channelBusy ? (
-                            <span className="flex items-center gap-1.5">
-                              <TypingDots size="sm" className="text-current" />
-                              <span>
-                                {connectPhase === "validating" ? "Checking token..." :
-                                 connectPhase === "saving" ? "Saving config..." :
-                                 connectPhase === "restarting" ? "Starting gateway..." :
-                                 "Connecting..."}
-                              </span>
-                            </span>
-                          ) : "Connect"}
-                        </button>
-                      </div>
-                      {channelBusy && (
-                        <button
-                          type="button"
-                          onClick={cancelChannelConnect}
-                          className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          Cancel
-                        </button>
-                      )}
-                      {channelResult?.type === "error" ? (
-                        <p className="text-xs text-red-400">{channelResult.message}</p>
-                      ) : null}
-                    </div>
-                  )}
-
-                  {currentChannel?.setupType === "qr" && (
-                    <div className="space-y-3">
-                      <p className="text-xs text-muted-foreground">{currentChannel.description}</p>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setQrChannel("whatsapp");
-                          setShowQrModal(true);
-                        }}
-                        disabled={channelBusy}
-                        className={cn(
-                          "rounded-full px-5 py-2.5 text-sm font-medium transition-opacity",
-                          channelBusy
-                            ? "cursor-not-allowed bg-muted text-muted-foreground"
-                            : "bg-primary text-primary-foreground hover:opacity-90",
-                        )}
-                      >
-                        {channelBusy ? (
-                          <span className="flex items-center gap-1.5">
-                            <TypingDots size="sm" className="text-current" />
-                            <span>
-                              {connectPhase === "saving" ? "Saving config..." :
-                               connectPhase === "restarting" ? "Starting gateway..." :
-                               "Connecting..."}
-                            </span>
-                          </span>
-                        ) : "Scan QR Code"}
-                      </button>
-                      {currentChannel.docsUrl && (
-                        <a
-                          href={currentChannel.docsUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex text-xs text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          Open setup guide
-                        </a>
-                      )}
-                    </div>
-                  )}
-
-                  {currentChannel?.setupType === "manual" && (
-                    <div className="space-y-3 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4">
-                      <p className="text-sm font-medium text-foreground">Manual setup required</p>
-                      <p className="text-xs leading-relaxed text-muted-foreground">
-                        {currentChannel.description}
-                      </p>
-                      <p className="text-xs leading-relaxed text-muted-foreground">
-                        {currentChannel.nextSteps}
-                      </p>
-                      <div className="flex items-center gap-3">
-                        {currentChannel.docsUrl && (
-                          <a
-                            href={currentChannel.docsUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-1 rounded-full bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
-                          >
-                            Open setup guide
-                          </a>
-                        )}
-                        <span className="text-xs text-muted-foreground">
-                          You can finish this later from the full Channels page.
-                        </span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (pairingTimeoutRef.current) clearTimeout(pairingTimeoutRef.current);
-                        pairingTimeoutRef.current = null;
-                        setPairingRequests([]);
-                        setPairingTimeout(false);
-                        setConnectedChannel(null);
-                        setSelectedChannel(null);
-                        setChannelToken("");
-                        setChannelAppToken("");
-                        setChannelResult(null);
-                        setConnectPhase("idle");
-                        setBotName("");
-                        setBotUsername("");
-                        setStep("model");
-                      }}
-                      disabled={channelBusy}
-                      className={cn(
-                        "rounded-full px-5 py-2.5 text-sm font-medium transition-colors",
-                        channelBusy
-                          ? "cursor-not-allowed text-muted-foreground/40"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="button"
-                      onClick={finishSetup}
-                      disabled={channelBusy}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full border border-border px-5 py-2.5 text-sm font-medium transition-colors",
-                        channelBusy
-                          ? "cursor-not-allowed text-muted-foreground/40"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                      )}
-                    >
-                      <SkipForward className="h-3.5 w-3.5" />
-                      Skip channel setup
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {step === "channel" && connectedChannel && connectedChannelDef && (
-                <div className="space-y-6">
-                  <div>
-                    <h2 className="text-sm font-semibold text-foreground">Add messaging</h2>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Connect a channel so your agent can chat. You can always add more later.
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col items-center gap-3 py-4 text-center">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10">
-                      <CheckCircle className="h-7 w-7 text-emerald-400" />
-                    </div>
-                    <p className="text-sm font-medium text-emerald-300">
-                      {connectedChannelDef.icon} {connectedChannelDef.label} connected{botName ? ` (${botName})` : ""}
-                    </p>
-                    {connectedChannel === "telegram" && botUsername && (
-                      <a
-                        href={`https://t.me/${botUsername}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1.5 text-xs text-emerald-400 hover:text-emerald-300 transition-colors"
-                      >
-                        <ExternalLink className="h-3 w-3" /> Open @{botUsername} in Telegram
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Prompt user to text the bot */}
-                  <div className="rounded-xl border border-border bg-secondary/50 p-4 space-y-3">
-                    <div>
-                      <p className="text-xs font-medium text-foreground/80">Now test the connection</p>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        Open {connectedChannelDef.label} and send any message (like &quot;hi&quot;) to your bot
-                        {connectedChannel === "telegram" && botUsername ? ` (@${botUsername})` : ""}.
-                        The bot will reply with an 8-character pairing code — come back here and click <strong>Confirm &amp; Approve</strong> to activate the connection.
-                        Codes expire after 1 hour.
-                      </p>
-                    </div>
-
-                    {/* Waiting state */}
-                    {!approvalComplete && pairingRequests.length === 0 ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2 py-1">
-                          <TypingDots size="sm" className="text-violet-400/60" />
-                          <span className="text-xs text-muted-foreground">
-                            Waiting for a message to your bot...
-                          </span>
-                        </div>
-                        {pairingTimeout && (
-                          <div className="rounded-md border border-amber-500/20 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-300 space-y-1">
-                            <p className="font-medium">No pairing request detected yet.</p>
-                            <ul className="list-inside list-disc space-y-0.5 text-amber-300/80">
-                              <li>Open {connectedChannelDef.label} and send a message to your bot{connectedChannel === "telegram" && botUsername ? ` (@${botUsername})` : ""}</li>
-                              <li>Make sure you&apos;re messaging the correct bot, not a group</li>
-                              <li>If the problem persists, go back and re-enter the token</li>
-                            </ul>
-                          </div>
-                        )}
-                        {pairingError && (
-                          <div className="rounded-md border border-red-500/20 bg-red-500/10 px-2.5 py-2 text-xs text-red-300">
-                            {pairingError}
-                          </div>
-                        )}
-                      </div>
-                    ) : null}
-
-                    {/* Pairing request detected */}
-                    {pairingRequests.length > 0 && !approvalComplete ? (
-                      <p className="text-xs font-semibold text-emerald-400">Pairing request received!</p>
-                    ) : null}
-
-                    {pairingRequests.map((request) => {
-                      const approved = approvedCodes.has(request.code);
-                      return (
-                        <div
-                          key={request.code}
-                          className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-medium text-foreground">
-                                {request.senderName || "Unknown sender"}
-                              </p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">
-                                Pairing code: <code className="rounded bg-violet-500/15 px-1.5 py-0.5 font-bold tracking-wider text-violet-300">{request.code}</code>
-                              </p>
-                              {!approved && (
-                                <p className="mt-1 text-xs text-muted-foreground/60">
-                                  Confirm this matches the code you received in {connectedChannelDef.label}.
-                                </p>
-                              )}
-                            </div>
-                            {approved ? (
-                              <div className="flex items-center gap-1.5 text-xs text-emerald-400">
-                                <CheckCircle className="h-3.5 w-3.5" />
-                                Approved
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleApprovePairing(request)}
-                                disabled={approvingCode === request.code}
-                                className="shrink-0 rounded-full bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
-                              >
-                                {approvingCode === request.code ? (
-                                  <TypingDots size="sm" className="text-current" />
-                                ) : (
-                                  "Confirm & Approve"
-                                )}
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {/* Success state */}
-                    {approvalComplete ? (
-                      <div className="flex items-center gap-1.5 text-xs text-emerald-400">
-                        <CheckCircle className="h-3.5 w-3.5" />
-                        Approved! Your agent is now connected to {connectedChannelDef.label}.
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="flex items-center justify-end pt-2">
-                    <button
-                      type="button"
-                      onClick={finishSetup}
-                      disabled={channelBusy}
-                      className={cn(
-                        "inline-flex items-center gap-1.5 rounded-full px-5 py-2.5 text-sm font-medium transition-opacity",
-                        channelBusy
-                          ? "cursor-not-allowed bg-muted text-muted-foreground"
-                          : "bg-primary text-primary-foreground hover:opacity-90",
-                      )}
-                    >
-                      Finish setup
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {step === "finishing" && (
-                <div className="py-12">
-                  {!launchError ? (
-                    <div className="flex flex-col items-center justify-center gap-4 text-center">
-                      <TypingDots size="lg" className="text-muted-foreground" />
-                      <div>
-                        <p className="text-sm text-muted-foreground">Setting up your agent...</p>
-                        <p className="mt-1 text-xs text-muted-foreground/50">
-                          Saving credentials, configuring model, and starting the gateway. This may take 20–30 seconds.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mx-auto flex max-w-sm flex-col items-center gap-3 text-center">
-                      <AlertCircle className="h-10 w-10 text-red-400" />
-                      <p className="text-sm font-medium text-foreground">Something went wrong</p>
-                      <p className="text-xs text-muted-foreground">{launchError}</p>
-                      <div className="mt-2 flex w-full flex-col gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void runQuickSetup()}
-                          className="w-full rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-                        >
-                          Try Again
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setLaunchError(null);
-                            setStep("channel");
-                          }}
-                          className="w-full rounded-full px-5 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          Back
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Skip onboarding — inside the card's scroll area */}
-              {step !== "finishing" && (
-                <div className="mt-6 border-t border-border/50 pt-5 text-center">
-                  {!showSkipConfirm ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowSkipConfirm(true)}
-                      className="text-xs text-muted-foreground/40 transition-colors hover:text-muted-foreground"
-                    >
-                      I prefer to configure manually
-                    </button>
-                  ) : (
-                    <div className="mx-auto max-w-sm rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-                      <p className="text-xs font-medium text-foreground">Are you sure?</p>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        You&apos;ll need to set up API keys, choose a model, and start the gateway
-                        yourself using the command line. You can always come back to the app
-                        settings later to configure everything through the UI instead.
-                      </p>
-                      <div className="mt-3 flex items-center justify-center gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setShowSkipConfirm(false)}
-                          className="rounded-full border border-border px-4 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-                        >
-                          Continue setup
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            skipOnboarding();
-                          }}
-                          className="rounded-full bg-amber-600 px-4 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90"
-                        >
-                          Skip for now
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
+    <div className="flex flex-col items-center gap-5 py-6 animate-in fade-in duration-300">
+      {/* Icon with animated ring */}
+      <div className="relative flex h-16 w-16 items-center justify-center">
+        <span className="absolute inset-0 rounded-full bg-stone-200 dark:bg-[#23282e] animate-ping opacity-40" />
+        <span className="absolute inset-2 rounded-full bg-stone-100 dark:bg-[#1c2128] animate-ping opacity-30 [animation-delay:400ms]" />
+        <div className="relative flex h-16 w-16 items-center justify-center rounded-full bg-stone-100 dark:bg-[#1c2128] ring-1 ring-stone-200 dark:ring-[#23282e]">
+          <Zap
+            className={cn(
+              "h-6 w-6 transition-colors duration-700",
+              scanLine % 2 === 0
+                ? "text-stone-400 dark:text-[#5a6270]"
+                : "text-stone-600 dark:text-[#a8b0ba]",
+            )}
+          />
         </div>
       </div>
 
-      {showQrModal && (
-        <QrLoginModal
-          channel={qrChannel}
-          onClose={() => setShowQrModal(false)}
-          onSuccess={async () => {
-            setShowQrModal(false);
-            setSelectedChannel(qrChannel);
-            setChannelBusy(true);
-            setConnectPhase("saving");
+      {/* Text */}
+      <div className="text-center space-y-1.5">
+        <p className="text-sm font-semibold text-stone-800 dark:text-[#f5f7fa]">
+          Waiting for your message
+        </p>
+        <p className="text-xs text-stone-500 dark:text-[#a8b0ba] max-w-[260px] leading-relaxed">
+          Open{" "}
+          <span className="font-medium text-stone-700 dark:text-[#d4dae2]">
+            {configuredChannels.map((c) => c.label).join(" or ")}
+          </span>
+          , find your bot, and send it any message to start pairing.
+        </p>
+      </div>
 
-            try {
-              // Enable WhatsApp in gateway config
-              const res = await fetch("/api/channels", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "connect", channel: qrChannel }),
-              });
-              const data = await res.json();
-              if (!res.ok || data.ok === false) {
-                throw new Error(data.error || "Could not enable WhatsApp in config.");
-              }
-
-              // Wait for gateway restart and channel readiness
-              setConnectPhase("restarting");
-              const healthy = await waitForGatewayHealth(qrChannel);
-              if (!healthy) {
-                throw new Error("Connection is taking a while — please try again.");
-              }
-
-              setConnectPhase("ready");
-              setConnectedChannel(qrChannel);
-              setChannelResult({
-                type: "success",
-                message: `${getChannelLabel(qrChannel)} connected successfully!`,
-              });
-              setApprovedCodes(new Set());
-              setPairingRequests([]);
-
-              // Start 2-minute pairing timeout
-              pairingTimeoutRef.current = setTimeout(() => {
-                setPairingTimeout(true);
-              }, 120000);
-            } catch (error) {
-              setConnectPhase("idle");
-              setChannelResult({
-                type: "error",
-                message: error instanceof Error ? error.message : "Could not enable WhatsApp.",
-              });
-            } finally {
-              setChannelBusy(false);
-            }
-          }}
-        />
-      )}
-    </>
+      {/* Subtle channel chips */}
+      <div className="flex items-center gap-2">
+        {configuredChannels.map((c) => (
+          <span
+            key={c.id}
+            className="flex items-center gap-1.5 rounded-full border border-stone-200 dark:border-[#23282e] bg-stone-50 dark:bg-[#0d1014] px-3 py-1.5 text-xs text-stone-500 dark:text-[#a8b0ba]"
+          >
+            <span className="[&>svg]:h-3 [&>svg]:w-3">{c.logo}</span>
+            {c.label}
+          </span>
+        ))}
+      </div>
+    </div>
   );
+}
+
+function formatTimeAgo(dateStr: string): string {
+  const ts = new Date(dateStr).getTime();
+  if (!ts) return "";
+  const ago = Date.now() - ts;
+  if (ago < 60000) return "just now";
+  if (ago < 3600000) return Math.floor(ago / 60000) + "m ago";
+  if (ago < 86400000) return Math.floor(ago / 3600000) + "h ago";
+  return Math.floor(ago / 86400000) + "d ago";
 }
