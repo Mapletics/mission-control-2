@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
+import { useSmartPoll } from "@/hooks/use-smart-poll";
 import {
   Check,
   ChevronRight,
@@ -277,8 +278,6 @@ export function OnboardingWizard({ onComplete }: Props) {
 
   // ── Step 3: Poll pairing requests ──
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   const configuredChannels = CHANNELS.filter((c) => channelTokens[c.id]?.trim());
 
   const fetchPairing = useCallback(async () => {
@@ -295,10 +294,10 @@ export function OnboardingWizard({ onComplete }: Props) {
     }
   }, [channelTokens]);
 
+  useSmartPoll(fetchPairing, { intervalMs: 5000, enabled: step === 3 });
+
   useEffect(() => {
     if (step !== 3) return;
-    fetchPairing();
-    pollRef.current = setInterval(fetchPairing, 4000);
     // Fetch bot names for configured channels
     for (const ch of configuredChannels) {
       const token = channelTokens[ch.id]?.trim();
@@ -316,10 +315,7 @@ export function OnboardingWizard({ onComplete }: Props) {
         })
         .catch(() => {});
     }
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [step, fetchPairing, configuredChannels, channelTokens]);
+  }, [step, configuredChannels, channelTokens]);
 
   const handleApprove = useCallback(
     async (channel: string, code: string) => {
@@ -334,7 +330,6 @@ export function OnboardingWizard({ onComplete }: Props) {
         const data = await res.json().catch(() => null);
         if (data?.ok) {
           setApproved(true);
-          if (pollRef.current) clearInterval(pollRef.current);
           setTimeout(() => onComplete(), 1500);
         } else {
           setError(data?.error || `Approve failed (${res.status}).`);
