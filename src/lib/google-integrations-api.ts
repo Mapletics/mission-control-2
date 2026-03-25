@@ -91,6 +91,21 @@ export type IntegrationConnectionOverview = {
   updatedAt: number;
 };
 
+export type SlackChannelRule = {
+  channelId: string;
+  allow: boolean;
+  requireMention: boolean;
+};
+
+export type SlackConnectionDetail = IntegrationConnectionOverview & {
+  accountId: string;
+  accountLabel: string;
+  configured: boolean;
+  running: boolean;
+  bindingCount: number;
+  allowedChannels: SlackChannelRule[];
+};
+
 export type IntegrationAgentMatrixCell = {
   providerKey: IntegrationProviderKey;
   providerLabel: string;
@@ -257,11 +272,32 @@ function buildConnectionOverview(
     .sort((a, b) => b.updatedAt - a.updatedAt || a.label.localeCompare(b.label));
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function readSlackChannelRules(value: unknown): SlackChannelRule[] {
+  const record = asRecord(value);
+  if (!record) return [];
+  return Object.entries(record)
+    .map(([channelId, config]) => {
+      const entry = asRecord(config);
+      return {
+        channelId,
+        allow: entry?.allow !== false,
+        requireMention: entry?.requireMention === true,
+      };
+    })
+    .sort((a, b) => a.channelId.localeCompare(b.channelId));
+}
+
 function buildSlackConnections(
   configData: Awaited<ReturnType<typeof fetchConfig>>,
   agents: IntegrationAgentSummary[],
   channelStatus: Record<string, unknown>,
-): IntegrationConnectionOverview[] {
+): SlackConnectionDetail[] {
   const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
   const bindings = extractBindings(configData).filter(
     (binding) => binding.agentId && binding.match.channel === "slack",
@@ -277,10 +313,8 @@ function buildSlackConnections(
     resolvedChannels.slack && typeof resolvedChannels.slack === "object"
       ? (resolvedChannels.slack as Record<string, unknown>)
       : null;
-  const slackAccountsConfig =
-    slackConfig?.accounts && typeof slackConfig.accounts === "object"
-      ? (slackConfig.accounts as Record<string, unknown>)
-      : {};
+  const slackAccountsConfig = asRecord(slackConfig?.accounts) || {};
+  const defaultChannelRules = readSlackChannelRules(slackConfig?.channels);
 
   const accountsByChannel = Array.isArray((channelStatus.channelAccounts as Record<string, unknown> | undefined)?.slack)
     ? ((channelStatus.channelAccounts as Record<string, unknown>).slack as Array<Record<string, unknown>>)
@@ -327,6 +361,15 @@ function buildSlackConnections(
         ? "limited-access"
         : "pending";
 
+    const accountConfig =
+      accountId === "default"
+        ? asRecord(slackAccountsConfig.default)
+        : asRecord(slackAccountsConfig[accountId]);
+    const accountRules =
+      accountId === "default"
+        ? defaultChannelRules
+        : readSlackChannelRules(accountConfig?.channels);
+
     return {
       id: `slack:${agentId}:${accountId}`,
       providerKey: "slack",
@@ -341,6 +384,7 @@ function buildSlackConnections(
       scopeBadges: [
         `channel slack`,
         `account ${accountId}`,
+        `${accountRules.length} routes`,
         connected ? "connected" : configured ? "configured" : "pending",
       ],
       agentAccess: agents.map((agent) => ({
@@ -352,6 +396,16 @@ function buildSlackConnections(
       })),
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      accountId,
+      accountLabel:
+        (typeof accountConfig?.name === "string" && accountConfig.name.trim()) ||
+        (accountId === "default" ? "Sanji" : accountId),
+      configured,
+      running: connected,
+      bindingCount: bindings.filter(
+        (binding) => binding.agentId === agentId && (binding.match.accountId?.trim() || "default") === accountId,
+      ).length,
+      allowedChannels: accountRules,
     };
   });
 }
@@ -619,6 +673,7 @@ export async function buildGoogleIntegrationsSnapshot(agentId: string | null = n
           (entry.accountId ? visibleAccountIds.has(entry.accountId) : true) &&
           (!selectedAgentId || entry.agentId === null || entry.agentId === selectedAgentId),
       ),
+      slackConnections,
     },
   };
 }
