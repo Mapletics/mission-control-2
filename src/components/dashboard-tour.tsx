@@ -270,7 +270,7 @@ export function DashboardTour() {
 
   return (
     <>
-      <div className="fixed inset-0 z-[120] bg-black/60 backdrop-blur-[1px]" />
+      <div className="pointer-events-none fixed inset-0 z-[120] bg-black/60 backdrop-blur-[1px]" />
       {focusRect && (
         <div
           className="pointer-events-none fixed z-[121] rounded-xl border-2 border-emerald-300/95 shadow-[0_0_0_2px_rgba(16,185,129,0.35),0_0_30px_rgba(16,185,129,0.28)]"
@@ -284,7 +284,7 @@ export function DashboardTour() {
       )}
 
       <div
-        className="fixed z-[122] rounded-2xl border border-stone-200/80 bg-white p-5 text-stone-900 shadow-2xl dark:border-[#2e353d] dark:bg-[#13171c] dark:text-[#f5f7fa]"
+        className="pointer-events-auto fixed z-[122] rounded-2xl border border-stone-200/80 bg-white p-5 text-stone-900 shadow-2xl dark:border-[#2e353d] dark:bg-[#13171c] dark:text-[#f5f7fa]"
         style={panelStyle}
         role="dialog"
         aria-modal="true"

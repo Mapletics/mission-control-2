@@ -245,14 +245,36 @@ export class AutoTransport implements OpenClawClient {
     params?: Record<string, unknown>,
     timeout?: number,
   ): Promise<T> {
-    // gatewayRpc uses WebSocket/HTTP RPC — CLI fallback does not help here
-    // (the CLI would spawn a new gateway process or timeout). Fail fast and let
-    // callers serve stale cache instead of spawning an expensive subprocess.
+    if (this.permanentCliMode) {
+      if (this.activeCli >= this.maxCli) {
+        throw new Error("Gateway busy — too many pending CLI operations");
+      }
+      this.activeCli++;
+      try {
+        return await this.cli.gatewayRpc<T>(method, params, timeout);
+      } finally {
+        this.activeCli--;
+      }
+    }
+
     await this.probe();
     if (this.preferHttp) {
-      return this.http.gatewayRpc<T>(method, params, timeout);
+      try {
+        return await this.http.gatewayRpc<T>(method, params, timeout);
+      } catch (err) {
+        this.markHttpFailed(errorToMessage(err));
+      }
     }
-    throw new Error(`Gateway RPC unavailable for ${method} — gateway is not reachable via HTTP`);
+
+    if (this.activeCli >= this.maxCli) {
+      throw new Error("Gateway busy — too many pending CLI operations");
+    }
+    this.activeCli++;
+    try {
+      return await this.cli.gatewayRpc<T>(method, params, timeout);
+    } finally {
+      this.activeCli--;
+    }
   }
 
   readFile(path: string): Promise<string> {
