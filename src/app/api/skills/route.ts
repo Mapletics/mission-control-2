@@ -181,6 +181,7 @@ function buildSharedSkillDetail(skill: SharedSkillEntry): SkillDetail {
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const action = searchParams.get("action") || "list";
+  const sharedSkills = await loadSharedSkills();
 
   try {
     if (action === "check") {
@@ -258,7 +259,6 @@ export async function GET(request: NextRequest) {
 
     // Default: list all skills
     const data = await runCliJson<SkillsList>(["skills", "list"]);
-    const sharedSkills = await loadSharedSkills();
     const existing = new Set(data.skills.map((skill) => skill.name));
     for (const skill of sharedSkills) {
       if (existing.has(skill.name)) continue;
@@ -298,7 +298,17 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         workspaceDir: "",
         managedSkillsDir: "",
-        skills: [],
+        skills: sharedSkills.map((skill) => ({
+          name: skill.name,
+          description: skill.description,
+          emoji: "🧰",
+          eligible: true,
+          disabled: false,
+          blockedByAllowlist: false,
+          source: skill.source,
+          bundled: false,
+          missing: { ...EMPTY_MISSING },
+        })),
         warning: String(err),
         degraded: true,
       });
