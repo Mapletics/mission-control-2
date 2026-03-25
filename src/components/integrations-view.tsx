@@ -51,6 +51,7 @@ type AccountRecord = {
   id: string;
   email: string;
   label: string;
+  ownerAgentId: string;
   status: "connected" | "pending" | "needs-reauthorization" | "limited-access" | "error";
   accessLevel: "read-only" | "read-draft" | "read-write" | "custom";
   pendingAuthUrl: string | null;
@@ -801,10 +802,27 @@ export function IntegrationsView() {
                 <CardHeader>
                   <CardTitle>Connect Google</CardTitle>
                   <CardDescription>
-                    Choose an explicit access level first. The default safe option is Read Only.
+                    Connect one Google account to exactly one agent. The default safe option is Read Only.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
+                      Target agent
+                    </label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm dark:border-[#30363d] dark:bg-[#0f1318]"
+                      value={selectedAgentId}
+                      onChange={(event) => void syncAgentSelection(event.target.value)}
+                    >
+                      {(data?.agents || []).map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                          {agent.isDefault ? " (default)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <div className="space-y-2">
                     <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
                       Google account email
@@ -831,6 +849,9 @@ export function IntegrationsView() {
                     </select>
                   </div>
                   <div className="rounded-lg border border-stone-200/80 bg-stone-50 p-3 text-sm text-stone-600 dark:border-[#23282e] dark:bg-[#111418] dark:text-[#a8b0ba]">
+                    <p className="mb-2 text-xs font-medium text-stone-700 dark:text-[#d8dee6]">
+                      This connection will belong only to {selectedAgent?.name || selectedAgentId || "the selected agent"}.
+                    </p>
                     {connectAccessLevel === "read-only" && "The assistant can look things up, but cannot send or change anything."}
                     {connectAccessLevel === "read-draft" && "The assistant can read and prepare drafts, but you keep control before anything is sent."}
                     {connectAccessLevel === "read-write" && "The assistant can read and take approved actions like replying or creating events."}
@@ -843,6 +864,7 @@ export function IntegrationsView() {
                         void runAction("start-connect", {
                           email: connectEmail,
                           accessLevel: connectAccessLevel,
+                          agentId: selectedAgentId,
                         })
                       }
                       disabled={!connectEmail.trim() || actionBusy !== null}
@@ -857,6 +879,7 @@ export function IntegrationsView() {
                         void runAction("import-existing-account", {
                           email: connectEmail,
                           accessLevel: connectAccessLevel,
+                          agentId: selectedAgentId,
                         })
                       }
                       disabled={!connectEmail.trim() || actionBusy !== null}
@@ -894,10 +917,12 @@ export function IntegrationsView() {
                                   ? void runAction("start-connect", {
                                       email: account.email,
                                       accessLevel: connectAccessLevel,
+                                      agentId: selectedAgentId,
                                     })
                                   : void runAction("import-existing-account", {
                                       email: account.email,
                                       accessLevel: connectAccessLevel,
+                                      agentId: selectedAgentId,
                                     })
                               }
                               disabled={actionBusy !== null}
@@ -925,7 +950,7 @@ export function IntegrationsView() {
                 <CardHeader>
                   <CardTitle>Accounts</CardTitle>
                   <CardDescription>
-                    Connected Google accounts and their current safety level.
+                    Google accounts owned by {selectedAgent?.name || selectedAgentId || "the selected agent"}.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -957,6 +982,7 @@ export function IntegrationsView() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Badge variant="outline">Google</Badge>
+                        <Badge variant="outline">Owner {account.ownerAgentId}</Badge>
                         <Badge variant="outline">{ACCESS_LEVEL_LABELS[account.accessLevel]}</Badge>
                         <Badge variant="outline">Gmail {account.serviceStates.gmail.scopeStatus}</Badge>
                         <Badge variant="outline">Calendar {account.serviceStates.calendar.scopeStatus}</Badge>
@@ -1098,7 +1124,7 @@ export function IntegrationsView() {
                             {selectedAgent?.name || "Selected Agent"}
                           </h2>
                           <p className="text-xs text-stone-500 dark:text-[#8d98a5]">
-                            Manage tool access, scopes, and approval policies for this agent.
+                            This agent owns the selected Google account and is the only one allowed to use it.
                           </p>
                           <div className="max-w-xs pt-1">
                             <label className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">
@@ -1156,7 +1182,7 @@ export function IntegrationsView() {
                                       size="sm"
                                       className="h-7 px-2 text-xs"
                                       onClick={() =>
-                                        void runAction("check-access", { accountId: selectedAccount.id })
+                                        void runAction("check-access", { accountId: selectedAccount.id, agentId: selectedAgentId })
                                       }
                                       disabled={actionBusy !== null}
                                     >
@@ -1681,25 +1707,7 @@ export function IntegrationsView() {
                         <div className="grid gap-3 md:grid-cols-2">
                           <div className="space-y-2">
                             <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">Target agent</label>
-                            <select
-                              className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm dark:border-[#30363d] dark:bg-[#0f1318]"
-                              value={selectedAccount.watch.targetAgentId || selectedAgentId}
-                              onChange={(event) =>
-                                void runAction("set-watch-config", {
-                                  accountId: selectedAccount.id,
-                                  watch: {
-                                    ...selectedAccount.watch,
-                                    targetAgentId: event.target.value,
-                                  },
-                                })
-                              }
-                            >
-                              {(data?.agents || []).map((agent) => (
-                                <option key={agent.id} value={agent.id}>
-                                  {agent.name}
-                                </option>
-                              ))}
-                            </select>
+                            <Input value={selectedAccount.ownerAgentId} disabled />
                           </div>
                           <div className="space-y-2">
                             <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">Google Cloud project ID</label>

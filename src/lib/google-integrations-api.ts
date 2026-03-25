@@ -8,6 +8,7 @@ import {
   fetchConfig,
 } from "@/lib/gateway-config";
 import {
+  accountOwnedByAgent,
   getGoogleAgentPolicy,
   GOOGLE_CAPABILITY_DEFINITIONS,
   isCapabilityEnabledForAccount,
@@ -211,6 +212,10 @@ export async function buildGoogleIntegrationsSnapshot(agentId: string | null = n
     agentId && agents.some((entry) => entry.id === agentId)
       ? agentId
       : (agents.find((entry) => entry.isDefault) || agents[0] || null)?.id || null;
+  const visibleAccounts = selectedAgentId
+    ? store.accounts.filter((account) => accountOwnedByAgent(account, selectedAgentId))
+    : [];
+  const visibleAccountIds = new Set(visibleAccounts.map((account) => account.id));
 
   return {
     generatedAt: Date.now(),
@@ -225,7 +230,7 @@ export async function buildGoogleIntegrationsSnapshot(agentId: string | null = n
     capabilities: GOOGLE_CAPABILITY_DEFINITIONS,
     store: {
       ...store,
-      accounts: store.accounts.map((account) => ({
+      accounts: visibleAccounts.map((account) => ({
         ...account,
         capabilityMatrix: GOOGLE_CAPABILITY_DEFINITIONS.map((capability) => ({
           ...capability,
@@ -236,6 +241,16 @@ export async function buildGoogleIntegrationsSnapshot(agentId: string | null = n
         })),
         diagnostics: buildAccountDiagnostics(store, account, selectedAgentId),
       })),
+      approvals: store.approvals.filter(
+        (entry) =>
+          visibleAccountIds.has(entry.accountId) &&
+          (!selectedAgentId || entry.agentId === selectedAgentId),
+      ),
+      audit: store.audit.filter(
+        (entry) =>
+          (entry.accountId ? visibleAccountIds.has(entry.accountId) : true) &&
+          (!selectedAgentId || entry.agentId === null || entry.agentId === selectedAgentId),
+      ),
     },
   };
 }
