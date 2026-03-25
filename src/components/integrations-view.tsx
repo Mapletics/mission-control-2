@@ -11,7 +11,6 @@ import {
   Mail,
   Plus,
   RefreshCw,
-  Shield,
   ShieldCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -297,7 +296,6 @@ export function IntegrationsView() {
   const [connectAccessLevel, setConnectAccessLevel] = useState<AccountRecord["accessLevel"]>("read-only");
   const [redirectUrl, setRedirectUrl] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
-  const [showGuide, setShowGuide] = useState(false);
 
   const load = useCallback(async (agentId?: string) => {
     setLoading(true);
@@ -428,11 +426,6 @@ export function IntegrationsView() {
     [data, selectedAgentId],
   );
 
-  const pendingApprovals = useMemo(
-    () => (data?.store.approvals || []).filter((entry) => entry.status === "pending"),
-    [data],
-  );
-
   const providerOverview = useMemo(
     () => data?.overview.providers || [],
     [data],
@@ -445,11 +438,6 @@ export function IntegrationsView() {
       : allConnections.filter((connection) => connection.providerKey === providerFilter);
   }, [data, providerFilter]);
 
-  const agentMatrixRows = useMemo(
-    () => data?.overview.agentMatrix || [],
-    [data],
-  );
-
   const ownedSlackConnections = useMemo(
     () =>
       (data?.store.slackConnections || []).filter(
@@ -460,11 +448,6 @@ export function IntegrationsView() {
 
   const slackProviderOverview = useMemo(
     () => providerOverview.find((provider) => provider.key === "slack") || null,
-    [providerOverview],
-  );
-
-  const googleProviderOverview = useMemo(
-    () => providerOverview.find((provider) => provider.key === "google-workspace") || null,
     [providerOverview],
   );
 
@@ -638,15 +621,6 @@ export function IntegrationsView() {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setShowGuide((current) => !current)}
-            >
-              <Shield className="mr-2 h-4 w-4" />
-              Setup Guide
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
               onClick={() => void load(selectedAgentId || undefined)}
               disabled={loading}
             >
@@ -658,49 +632,6 @@ export function IntegrationsView() {
       />
       <SectionBody width="wide" padding="regular">
         <div className="space-y-6">
-          {showGuide ? (
-            <Card id="setup-guide">
-              <CardHeader>
-                <CardTitle>Setup guide</CardTitle>
-                <CardDescription>
-                  Follow this if you want the browser-only path without touching a terminal.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]">
-                  <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">1. Choose access level</p>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-stone-600 dark:text-[#a8b0ba]">
-                    <li><strong>Read Only</strong>: read inbox and calendar, but no sending or updates.</li>
-                    <li><strong>Read + Draft</strong>: read plus draft replies for approval.</li>
-                    <li><strong>Read + Write</strong>: read and perform the write actions you allow.</li>
-                  </ul>
-                </div>
-                <div className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]">
-                  <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">2. Connect Google</p>
-                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-stone-600 dark:text-[#a8b0ba]">
-                    <li>Enter your email and click <strong>Start Browser-Safe Connect</strong>.</li>
-                    <li>Complete Google sign-in in the new tab.</li>
-                    <li>Copy the complete final redirect URL.</li>
-                    <li>Paste it into <strong>Finish Connection</strong> and submit.</li>
-                  </ol>
-                </div>
-                <div className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]">
-                  <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">3. Pick an agent</p>
-                  <p className="mt-2 text-sm text-stone-600 dark:text-[#a8b0ba]">
-                    Each capability can be set to <strong>Denied</strong>, <strong>Requires Approval</strong>, or <strong>Allowed</strong> for the selected agent.
-                  </p>
-                </div>
-                <div className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]">
-                  <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">4. Recover if something breaks</p>
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-stone-600 dark:text-[#a8b0ba]">
-                    <li>Use <strong>Check Access</strong> if Gmail or Calendar stops working.</li>
-                    <li>Use <strong>Reconnect</strong> if the account needs reauthorization.</li>
-                    <li>Use <strong>Configure Gmail Watch</strong> after filling in the project and webhook details.</li>
-                  </ul>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
           {error ? (
             <Card className="border-rose-500/30 bg-rose-500/5">
               <CardHeader>
@@ -727,15 +658,16 @@ export function IntegrationsView() {
           {activeView === "overview" ? (
             <OverviewSection
               providerOverview={providerOverview}
-              googleAgentCount={googleProviderOverview?.agentCount || 0}
-              pendingApprovalsCount={pendingApprovals.length}
-              connectionCount={data?.overview.connections.length || 0}
-              agentMatrixRows={agentMatrixRows}
               providerFilter={providerFilter}
               visibleOverviewConnections={visibleOverviewConnections}
               onProviderFilterChange={setProviderFilter}
               onProviderCreate={handleNewIntegration}
-              onConnectionOpen={(connection) => void handleOpenOverviewConnection(connection)}
+              onConnectionOpen={(connectionId) => {
+                const connection = data?.overview.connections.find((entry) => entry.id === connectionId);
+                if (connection) {
+                  void handleOpenOverviewConnection(connection);
+                }
+              }}
             />
           ) : null}
 
@@ -1000,25 +932,18 @@ export function IntegrationsView() {
                     >
                       Back
                     </Button>
-                      <div className="flex flex-wrap gap-3">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setShowGuide((current) => !current)}
-                        >
-                          Setup Guide
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="border-rose-500/20 bg-rose-500/5 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300"
-                          onClick={() =>
-                            void runAction("disconnect-account", { accountId: selectedAccount.id })
-                          }
-                        >
-                          Delete
-                        </Button>
-                      </div>
+                    <div className="flex flex-wrap gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="border-rose-500/20 bg-rose-500/5 text-rose-600 hover:bg-rose-500/10 dark:text-rose-300"
+                        onClick={() =>
+                          void runAction("disconnect-account", { accountId: selectedAccount.id })
+                        }
+                      >
+                        Delete
+                      </Button>
+                    </div>
                     </div>
 
                     <Card className="border-dashed border-stone-300/80 dark:border-[#30363d]">
