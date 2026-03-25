@@ -6,18 +6,11 @@ import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   CalendarDays,
-  CheckCircle2,
-  Eye,
   ExternalLink,
   HardDrive,
-  Inbox,
   Mail,
-  MailCheck,
-  MailPlus,
   Plus,
   RefreshCw,
-  Search,
-  Send,
   Shield,
   ShieldCheck,
 } from "lucide-react";
@@ -27,7 +20,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { SectionBody, SectionHeader, SectionLayout } from "@/components/section-layout";
 import { InlineSpinner, LoadingState } from "@/components/ui/loading-state";
-import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { AddIntegrationSection } from "@/components/integrations/add-integration-section";
 import { OverviewSection } from "@/components/integrations/overview-section";
@@ -245,57 +237,12 @@ type ApiResponse = {
   warning?: string | null;
 };
 
-type MailboxThread = {
-  id: string;
-  messageId: string | null;
-  subject: string;
-  snippet: string;
-  from: string;
-  to: string[];
-  lastMessageAt: string | null;
-};
-
-type ThreadMessage = {
-  id: string;
-  subject: string;
-  from: string;
-  to: string[];
-  cc: string[];
-  date: string | null;
-  snippet: string;
-  bodyText: string;
-};
-
-type ThreadDetails = {
-  id: string;
-  subject: string;
-  snippet: string;
-  messages: ThreadMessage[];
-};
-
-type CalendarEvent = {
-  id: string;
-  title: string;
-  startMs: number;
-  endMs: number;
-  allDay: boolean;
-  calendarName: string;
-  location?: string;
-  notes?: string;
-};
-
 const ACCESS_LEVEL_LABELS: Record<AccountRecord["accessLevel"], string> = {
   "read-only": "Read Only",
   "read-draft": "Read + Draft",
   "read-write": "Read + Write",
   custom: "Custom",
 };
-
-const POLICY_OPTIONS = [
-  { value: "deny", label: "Denied" },
-  { value: "ask", label: "Requires Approval" },
-  { value: "allow", label: "Allowed" },
-] as const;
 
 function formatAgo(ts: number | null): string {
   if (!ts) return "Never";
@@ -304,16 +251,6 @@ function formatAgo(ts: number | null): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
   return `${Math.floor(diff / 86_400_000)}d ago`;
-}
-
-function formatDateTime(ts: number | null): string {
-  if (!ts) return "n/a";
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(ts));
 }
 
 function statusTone(status: AccountRecord["status"]): string {
@@ -340,47 +277,8 @@ function serviceStatusTone(status: "ready" | "unverified" | "error") {
   }
 }
 
-function capabilityIcon(capability: Capability["key"]) {
-  if (capability.includes("send") || capability.includes("reply")) return Send;
-  if (capability.includes("draft")) return MailCheck;
-  return Eye;
-}
-
 function firstDefault<T extends { isDefault?: boolean }>(rows: T[]): T | null {
   return rows.find((entry) => entry.isDefault) || rows[0] || null;
-}
-
-const DRAFT_KEY = "openclaw:integrations-drafts";
-
-function loadDrafts(): Record<string, string> {
-  try {
-    return JSON.parse(localStorage.getItem(DRAFT_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveDraft(field: string, value: string) {
-  try {
-    const drafts = loadDrafts();
-    if (value) drafts[field] = value;
-    else delete drafts[field];
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(drafts));
-  } catch { /* quota exceeded — ignore */ }
-}
-
-function clearAllDrafts() {
-  try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
-}
-
-/** useState backed by localStorage — saves instantly on every change. */
-function useDraft(field: string, fallback = ""): [string, (v: string) => void] {
-  const [value, setValue] = useState(() => loadDrafts()[field] ?? fallback);
-  const set = useCallback((v: string) => {
-    setValue(v);
-    saveDraft(field, v);
-  }, [field]);
-  return [value, set];
 }
 
 export function IntegrationsView() {
@@ -398,24 +296,8 @@ export function IntegrationsView() {
   const [connectEmail, setConnectEmail] = useState("");
   const [connectAccessLevel, setConnectAccessLevel] = useState<AccountRecord["accessLevel"]>("read-only");
   const [redirectUrl, setRedirectUrl] = useState("");
-  const [searchQuery, setSearchQuery] = useState("in:inbox newer_than:14d");
-  const [threads, setThreads] = useState<MailboxThread[]>([]);
-  const [threadBusy, setThreadBusy] = useState<string | null>(null);
-  const [threadDetails, setThreadDetails] = useState<ThreadDetails | null>(null);
-  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
-  const [composeTo, setComposeTo] = useDraft("composeTo");
-  const [composeSubject, setComposeSubject] = useDraft("composeSubject");
-  const [composeBody, setComposeBody] = useDraft("composeBody");
-  const [replyBody, setReplyBody] = useDraft("replyBody");
-  const [calendarTitle, setCalendarTitle] = useDraft("calendarTitle");
-  const [calendarFrom, setCalendarFrom] = useDraft("calendarFrom");
-  const [calendarTo, setCalendarTo] = useDraft("calendarTo");
-  const [calendarLocation, setCalendarLocation] = useDraft("calendarLocation");
-  const [calendarDescription, setCalendarDescription] = useDraft("calendarDescription");
-  const [calendarEventId, setCalendarEventId] = useDraft("calendarEventId");
   const [notice, setNotice] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
-  const [showAdvancedTools, setShowAdvancedTools] = useState(false);
 
   const load = useCallback(async (agentId?: string) => {
     setLoading(true);
@@ -517,15 +399,6 @@ export function IntegrationsView() {
         if (json.warning) setNotice(json.warning);
         if (json.queued) {
           setNotice("Action queued for approval. Review it in the Approval Queue below.");
-        }
-        // Clear drafts after successful send/draft/calendar actions
-        if (action === "gmail-send") {
-          setComposeTo(""); setComposeSubject(""); setComposeBody("");
-        } else if (action === "gmail-reply" || action === "gmail-draft") {
-          setReplyBody("");
-        } else if (action === "calendar-create" || action === "calendar-update") {
-          setCalendarTitle(""); setCalendarFrom(""); setCalendarTo("");
-          setCalendarLocation(""); setCalendarDescription(""); setCalendarEventId("");
         }
         return json;
       } catch (actionError) {
@@ -641,7 +514,6 @@ export function IntegrationsView() {
     });
   }, [accountMatrix, selectedAccount]);
 
-  const canAct = Boolean(selectedAccount && selectedAgent);
   const hasDetailSelection = Boolean(selectedAccount || selectedSlackConnection);
 
   const syncAgentSelection = useCallback(
@@ -651,11 +523,6 @@ export function IntegrationsView() {
     },
     [load],
   );
-
-  const focusSection = useCallback((id: string) => {
-    if (typeof document === "undefined") return;
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
 
   const handleNewIntegration = useCallback(
     (providerKey: IntegrationProviderKey) => {
@@ -674,7 +541,7 @@ export function IntegrationsView() {
         `${provider?.label || "This provider"} is not wired yet. The central integrations shell is ready, but only Google and Slack are active today.`,
       );
     },
-    [focusSection, providerOverview],
+    [providerOverview],
   );
 
   const handleOpenOverviewConnection = useCallback(
@@ -699,19 +566,6 @@ export function IntegrationsView() {
     [syncAgentSelection],
   );
 
-  const handlePolicyChange = useCallback(
-    async (capability: string, policy: string) => {
-      if (!selectedAccount || !selectedAgent || !policy) return;
-      await runAction("set-agent-policy", {
-        accountId: selectedAccount.id,
-        agentId: selectedAgent.id,
-        capability,
-        policy,
-      });
-    },
-    [runAction, selectedAccount, selectedAgent],
-  );
-
   const handleServiceAccess = useCallback(
     async (service: "gmail" | "calendar" | "drive", mode: "read" | "write") => {
       if (!selectedAccount) return;
@@ -722,81 +576,6 @@ export function IntegrationsView() {
       });
     },
     [runAction, selectedAccount],
-  );
-
-  const handleSearch = useCallback(async () => {
-    if (!selectedAccount || !selectedAgent) return;
-    const response = await runAction("gmail-search", {
-      accountId: selectedAccount.id,
-      agentId: selectedAgent.id,
-      query: searchQuery.trim() || "in:inbox",
-      max: 20,
-    });
-    if (response?.result && Array.isArray(response.result)) {
-      setThreads(response.result as MailboxThread[]);
-    }
-  }, [runAction, searchQuery, selectedAccount, selectedAgent]);
-
-  const handleThreadOpen = useCallback(
-    async (threadId: string) => {
-      if (!selectedAccount || !selectedAgent) return;
-      setThreadBusy(threadId);
-      try {
-        const response = await runAction("gmail-read-thread", {
-          accountId: selectedAccount.id,
-          agentId: selectedAgent.id,
-          threadId,
-        });
-        if (response?.result && typeof response.result === "object") {
-          const detail = response.result as ThreadDetails;
-          setThreadDetails(detail);
-          setReplyBody("");
-          setComposeSubject(detail.subject);
-        }
-      } finally {
-        setThreadBusy(null);
-      }
-    },
-    [runAction, selectedAccount, selectedAgent],
-  );
-
-  const loadCalendar = useCallback(async () => {
-    if (!selectedAccount || !selectedAgent) return;
-    const response = await runAction("calendar-list", {
-      accountId: selectedAccount.id,
-      agentId: selectedAgent.id,
-      days: 7,
-    });
-    if (response?.result && Array.isArray(response.result)) {
-      setCalendarEvents(response.result as CalendarEvent[]);
-    }
-  }, [runAction, selectedAccount, selectedAgent]);
-
-  const handleDiagnosticFixAction = useCallback(
-    async (fixAction: string) => {
-      if (!selectedAccount) return;
-      switch (fixAction) {
-        case "Reconnect": {
-          const response = await runAction("start-connect", {
-            email: selectedAccount.email,
-            accessLevel: selectedAccount.accessLevel,
-          });
-          return;
-        }
-        case "Check Access":
-          await runAction("check-access", { accountId: selectedAccount.id });
-          return;
-        case "Update Permissions":
-          setNotice("Permissions are edited directly in the access scopes above.");
-          return;
-        case "Enable Watch":
-          focusSection("incoming-events");
-          return;
-        default:
-          return;
-      }
-    },
-    [focusSection, runAction, selectedAccount],
   );
 
   if (loading && !data) {
