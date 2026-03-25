@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { access, readFile, readdir, writeFile, mkdir } from "fs/promises";
 import { constants as FS_CONSTANTS } from "fs";
 import { join, dirname } from "path";
-import { getDefaultWorkspaceSync, getOpenClawHome, getSystemSkillsDir } from "@/lib/paths";
+import { getDefaultWorkspaceSync, getOpenClawHome, getSharedSkillsDirs, getSystemSkillsDir } from "@/lib/paths";
 import { gatewayCall, runCliJson } from "@/lib/openclaw";
 import { buildModelsSummary } from "@/lib/models-summary";
 import { gatewayConfigPatch } from "@/lib/gateway-config";
@@ -532,11 +532,12 @@ function extractEnvNamesFromSkillMarkdown(markdown: string): string[] {
 }
 
 async function collectSkillMarkdownPaths() {
-  const out: Array<{ name: string; source: "workspace" | "system"; path: string }> = [];
+  const out: Array<{ name: string; source: "workspace" | "system" | "shared"; path: string }> = [];
   const workspaceSkillsDir = join(getDefaultWorkspaceSync(), "skills");
   const systemSkillsDir = await getSystemSkillsDir().catch(() => "");
+  const sharedSkillsDirs = await getSharedSkillsDirs().catch(() => []);
 
-  const scan = async (root: string, source: "workspace" | "system") => {
+  const scan = async (root: string, source: "workspace" | "system" | "shared") => {
     if (!root) return;
     let entries: { isDirectory(): boolean; name: string }[] = [];
     try {
@@ -556,6 +557,11 @@ async function collectSkillMarkdownPaths() {
   await scan(workspaceSkillsDir, "workspace");
   if (systemSkillsDir !== workspaceSkillsDir) {
     await scan(systemSkillsDir, "system");
+  }
+  for (const sharedSkillsDir of sharedSkillsDirs) {
+    if (sharedSkillsDir !== workspaceSkillsDir && sharedSkillsDir !== systemSkillsDir) {
+      await scan(sharedSkillsDir, "shared");
+    }
   }
 
   return out;

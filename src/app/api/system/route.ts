@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFile, readdir } from "fs/promises";
 import { join } from "path";
-import { getOpenClawHome, getSystemSkillsDir, getDefaultWorkspaceSync, readConfigFile } from "@/lib/paths";
+import { getOpenClawHome, getSystemSkillsDir, getDefaultWorkspaceSync, getSharedSkillsDirs, readConfigFile } from "@/lib/paths";
 import { fetchGatewaySessions, type NormalizedGatewaySession } from "@/lib/gateway-sessions";
 
 const OPENCLAW_HOME = getOpenClawHome();
@@ -46,7 +46,7 @@ type ChannelInfo = {
 
 type SkillInfo = {
   name: string;
-  source: "workspace" | "system";
+  source: "workspace" | "system" | "shared";
   version?: string;
   description?: string;
   installedAt?: number;
@@ -289,6 +289,21 @@ async function getSkills(): Promise<SkillInfo[]> {
     }
   } catch {
     // system skills dir may not exist
+  }
+
+  // Shared local skills (for example dev-handbook/skills)
+  try {
+    const sharedSkillDirs = await getSharedSkillsDirs();
+    for (const sharedSkillsPath of sharedSkillDirs) {
+      const entries = await readdir(sharedSkillsPath, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isDirectory() && !skills.find((s) => s.name === e.name)) {
+          skills.push({ name: e.name, source: "shared" });
+        }
+      }
+    }
+  } catch {
+    // shared skills dir may not exist
   }
 
   return skills;

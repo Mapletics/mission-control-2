@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runCliJson } from "@/lib/openclaw";
 import { fetchConfig, patchConfig } from "@/lib/gateway-config";
-import { readFile } from "fs/promises";
+import { access, readFile, readdir } from "fs/promises";
+import { constants as FS_CONSTANTS } from "fs";
+import { join } from "path";
+import { getSharedSkillsDirs } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +81,101 @@ type SkillDetail = {
   install: { id: string; kind: string; label: string; bins?: string[] }[];
 };
 
+type SharedSkillEntry = {
+  name: string;
+  filePath: string;
+  baseDir: string;
+  description: string;
+  source: string;
+};
+
+const EMPTY_MISSING = {
+  bins: [],
+  anyBins: [],
+  env: [],
+  config: [],
+  os: [],
+};
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path, FS_CONSTANTS.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function extractDescription(markdown: string): string {
+  const lines = markdown
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("---"))
+    .filter((line) => !line.startsWith("#"))
+    .filter((line) => !line.startsWith("```"));
+  return lines[0] || "Shared skill";
+}
+
+async function loadSharedSkills(): Promise<SharedSkillEntry[]> {
+  const dirs = await getSharedSkillsDirs();
+  const byName = new Map<string, SharedSkillEntry>();
+
+  for (const baseDir of dirs) {
+    let entries: { isDirectory(): boolean; name: string }[] = [];
+    try {
+      entries = await readdir(baseDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (byName.has(entry.name)) continue;
+
+      const filePath = join(baseDir, entry.name, "SKILL.md");
+      if (!(await exists(filePath))) continue;
+
+      let description = "Shared skill";
+      try {
+        description = extractDescription(await readFile(filePath, "utf-8"));
+      } catch {
+        // leave fallback description
+      }
+
+      byName.set(entry.name, {
+        name: entry.name,
+        filePath,
+        baseDir,
+        description,
+        source: "local",
+      });
+    }
+  }
+
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function buildSharedSkillDetail(skill: SharedSkillEntry): SkillDetail {
+  return {
+    name: skill.name,
+    description: skill.description,
+    source: skill.source,
+    bundled: false,
+    filePath: skill.filePath,
+    baseDir: skill.baseDir,
+    skillKey: skill.name,
+    always: false,
+    disabled: false,
+    blockedByAllowlist: false,
+    eligible: true,
+    requirements: EMPTY_MISSING,
+    missing: EMPTY_MISSING,
+    configChecks: [],
+    install: [],
+  };
+}
+
 /* ── GET ──────────────────────────────────────────── */
 
 export async function GET(request: NextRequest) {
@@ -95,7 +193,14 @@ export async function GET(request: NextRequest) {
       if (!name)
         return NextResponse.json({ error: "name required" }, { status: 400 });
 
-      const data = await runCliJson<SkillDetail>(["skills", "info", name]);
+      let data: SkillDetail;
+      try {
+        data = await runCliJson<SkillDetail>(["skills", "info", name]);
+      } catch (err) {
+        const sharedSkill = (await loadSharedSkills()).find((skill) => skill.name === name);
+        if (!sharedSkill) throw err;
+        data = buildSharedSkillDetail(sharedSkill);
+      }
 
       // Try to read the SKILL.md content for display
       let skillMd: string | null = null;
@@ -153,6 +258,22 @@ export async function GET(request: NextRequest) {
 
     // Default: list all skills
     const data = await runCliJson<SkillsList>(["skills", "list"]);
+    const sharedSkills = await loadSharedSkills();
+    const existing = new Set(data.skills.map((skill) => skill.name));
+    for (const skill of sharedSkills) {
+      if (existing.has(skill.name)) continue;
+      data.skills.push({
+        name: skill.name,
+        description: skill.description,
+        emoji: "🧰",
+        eligible: true,
+        disabled: false,
+        blockedByAllowlist: false,
+        source: skill.source,
+        bundled: false,
+        missing: { ...EMPTY_MISSING },
+      });
+    }
     return NextResponse.json(data);
   } catch (err) {
     console.error("Skills API error:", err);

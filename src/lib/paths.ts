@@ -19,7 +19,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { join } from "path";
+import { join, delimiter } from "path";
 import { access } from "fs/promises";
 import { homedir } from "os";
 
@@ -300,6 +300,8 @@ export async function getGatewayPort(): Promise<number> {
 
 let _skills: string | null = null;
 let _skillsDone = false;
+let _sharedSkillsDirs: string[] | null = null;
+let _sharedSkillsDirsDone = false;
 
 export async function getSystemSkillsDir(): Promise<string> {
   if (_skillsDone && _skills) return _skills;
@@ -342,6 +344,45 @@ export async function getSystemSkillsDir(): Promise<string> {
   _skills = "/usr/local/lib/node_modules/openclaw/skills";
   _skillsDone = true;
   return _skills;
+}
+
+// ── Shared/local custom skill directories ────────────────────────────────
+
+function parseSkillsDirList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(delimiter)
+    .flatMap((part) => part.split(","))
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+export async function getSharedSkillsDirs(): Promise<string[]> {
+  if (_sharedSkillsDirsDone && _sharedSkillsDirs) return _sharedSkillsDirs;
+
+  const explicit = [
+    ...parseSkillsDirList(process.env.OPENCLAW_SHARED_SKILLS_DIRS),
+    ...parseSkillsDirList(process.env.OPENCLAW_SHARED_SKILLS_DIR),
+  ];
+
+  const candidates = explicit.length
+    ? explicit
+    : [
+        join(homedir(), "dev-handbook", "skills"),
+        "/home/ubuntu/dev-handbook/skills",
+      ];
+
+  const unique = Array.from(new Set(candidates));
+  const existing: string[] = [];
+  for (const candidate of unique) {
+    if (await fileExists(candidate)) {
+      existing.push(candidate);
+    }
+  }
+
+  _sharedSkillsDirs = existing;
+  _sharedSkillsDirsDone = true;
+  return _sharedSkillsDirs;
 }
 
 // ── Gateway auth token ──────────────────────────
