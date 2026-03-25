@@ -832,7 +832,7 @@ export function IntegrationsView() {
           await runAction("check-access", { accountId: selectedAccount.id });
           return;
         case "Update Permissions":
-          focusSection("agent-permissions");
+          setNotice("Permissions are edited directly in the access scopes above.");
           return;
         case "Enable Watch":
           focusSection("incoming-events");
@@ -2008,57 +2008,18 @@ export function IntegrationsView() {
                           })}
                         </section>
 
-                        <section id="incoming-events" className="space-y-4 pt-2">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">
-                              Incoming Events
-                            </p>
-                            <span className="text-xs text-stone-500 dark:text-[#7a8591]">
-                              Configure
-                            </span>
-                          </div>
-                          <div className="rounded-xl border border-stone-200/80 bg-white p-4 dark:border-[#2c343d] dark:bg-[#171a1d]">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex items-center gap-3">
-                                <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-stone-200 bg-stone-50 dark:border-[#30363d] dark:bg-[#111418]">
-                                  <Inbox className="h-4 w-4 text-stone-600 dark:text-[#c7d0d9]" />
-                                </div>
-                                <div>
-                                  <p className="text-sm font-semibold text-stone-900 dark:text-[#f5f7fa]">
-                                    Gmail Watch
-                                  </p>
-                                  <p className="text-xs text-stone-500 dark:text-[#8d98a5]">
-                                    {selectedAccount.watch.enabled ? "Watching for new mail" : "Not watching"}
-                                  </p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <Badge className={cn("border text-[10px]", selectedAccount.watch.enabled ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "border-stone-300 dark:border-[#30363d]")}>
-                                  {selectedAccount.watch.enabled ? "Active" : "Inactive"}
-                                </Badge>
-                                <Switch
-                                  checked={selectedAccount.watch.enabled}
-                                  onCheckedChange={(checked) =>
-                                    void runAction("set-watch-config", {
-                                      accountId: selectedAccount.id,
-                                      watch: {
-                                        ...selectedAccount.watch,
-                                        enabled: checked,
-                                      },
-                                    })
-                                  }
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        </section>
-
                         <div className="flex flex-wrap gap-3 pt-2">
                           <Button
                             type="button"
-                            onClick={() => focusSection("agent-permissions")}
+                            variant="outline"
+                            onClick={() =>
+                              void runAction("check-access", {
+                                accountId: selectedAccount.id,
+                                agentId: selectedAgentId,
+                              })
+                            }
                           >
-                            Update Permissions
+                            Check Access
                           </Button>
                           <Button
                             type="button"
@@ -2070,7 +2031,7 @@ export function IntegrationsView() {
                               })
                             }
                           >
-                            Edit Credentials
+                            Reconnect Google
                           </Button>
                           <Button
                             type="button"
@@ -2087,13 +2048,13 @@ export function IntegrationsView() {
                     </Card>
                   </div>
 
-                  <Card>
-                    <CardHeader>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <CardTitle>Advanced workspace</CardTitle>
+                    <Card>
+                      <CardHeader>
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                          <CardTitle>Workspace Tools</CardTitle>
                           <CardDescription>
-                            Inbox actions, calendar editing, watch configuration, approvals, and audit history.
+                            Open the heavier Gmail, Calendar, watch, and approval tools only when you need them.
                           </CardDescription>
                         </div>
                         <Button
@@ -2102,7 +2063,7 @@ export function IntegrationsView() {
                           size="sm"
                           onClick={() => setShowAdvancedTools((current) => !current)}
                         >
-                          {showAdvancedTools ? "Hide Advanced Tools" : "Show Advanced Tools"}
+                          {showAdvancedTools ? "Hide Workspace Tools" : "Show Workspace Tools"}
                         </Button>
                       </div>
                     </CardHeader>
@@ -2588,7 +2549,7 @@ export function IntegrationsView() {
                     </Card>
                   </div>
 
-                  <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                  <div className="grid gap-6">
                     <Card>
                       <CardHeader>
                         <CardTitle>Recent activity</CardTitle>
@@ -2614,60 +2575,6 @@ export function IntegrationsView() {
                       </CardContent>
                     </Card>
 
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Setup guide & troubleshooting</CardTitle>
-                        <CardDescription>
-                          The important instructions are kept inside the product for non-technical users.
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-4 text-sm">
-                        <div className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]">
-                          <div className="flex items-start gap-3">
-                            <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-500" />
-                            <div>
-                              <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">What “Read Only” means</p>
-                              <p className="mt-1 text-stone-600 dark:text-[#a8b0ba]">
-                                The assistant can look up emails and calendar information, but it cannot send, reply, or change anything.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]">
-                          <div className="flex items-start gap-3">
-                            <ShieldAlert className="mt-0.5 h-5 w-5 text-amber-500" />
-                            <div>
-                              <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">If sending or replying fails</p>
-                              <p className="mt-1 text-stone-600 dark:text-[#a8b0ba]">
-                                Check the connection access level first. If the account is still Read Only, sending is blocked even before the agent policy is checked.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]">
-                          <div className="flex items-start gap-3">
-                            <AlertCircle className="mt-0.5 h-5 w-5 text-rose-500" />
-                            <div>
-                              <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">If connection finish fails</p>
-                              <p className="mt-1 text-stone-600 dark:text-[#a8b0ba]">
-                                Paste the complete final Google redirect URL, not just the code fragment. Then run “Check Access” after finishing.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]">
-                          <div className="flex items-start gap-3">
-                            <MailCheck className="mt-0.5 h-5 w-5 text-blue-500" />
-                            <div>
-                              <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">If Gmail watch setup fails</p>
-                              <p className="mt-1 text-stone-600 dark:text-[#a8b0ba]">
-                                The most common issue is a missing Google Cloud project ID or missing webhook information. Save the watch fields first, then click Configure Gmail Watch again.
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
                   </div>
                   </>
                   ) : null}
