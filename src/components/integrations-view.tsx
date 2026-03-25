@@ -136,12 +136,8 @@ type IntegrationConnectionOverview = {
   ownerAgentName: string;
   status: AccountRecord["status"];
   accessLevel: AccountRecord["accessLevel"];
-  serviceScopes: Array<{
-    service: "gmail" | "calendar" | "drive";
-    enabled: boolean;
-    apiStatus: "ready" | "unverified" | "error";
-    scopeStatus: "full" | "readonly" | "unknown";
-  }>;
+  accessLabel: string;
+  scopeBadges: string[];
   agentAccess: Array<{
     agentId: string;
     agentName: string;
@@ -1121,11 +1117,11 @@ export function IntegrationsView() {
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Badge className={cn("border", accessTone(connection.accessLevel))}>
-                      {ACCESS_LEVEL_LABELS[connection.accessLevel]}
+                      {connection.accessLabel}
                     </Badge>
-                    {connection.serviceScopes.map((scope) => (
-                      <Badge key={`${connection.id}-${scope.service}`} variant="outline">
-                        {scope.service} {scope.scopeStatus}
+                    {connection.scopeBadges.map((scope) => (
+                      <Badge key={`${connection.id}-${scope}`} variant="outline">
+                        {scope}
                       </Badge>
                     ))}
                   </div>

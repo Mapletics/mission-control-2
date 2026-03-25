@@ -4,9 +4,11 @@ import {
   listGogStoredAccounts,
 } from "@/lib/gog-google";
 import {
+  extractBindings,
   extractAgentsList,
   fetchConfig,
 } from "@/lib/gateway-config";
+import { gatewayCall } from "@/lib/openclaw";
 import {
   accountOwnedByAgent,
   getGoogleAgentPolicy,
@@ -64,13 +66,6 @@ export type IntegrationProviderOverview = {
   manageLabel: string;
 };
 
-export type IntegrationServiceScopeSummary = {
-  service: GoogleServiceKey;
-  enabled: boolean;
-  apiStatus: "ready" | "unverified" | "error";
-  scopeStatus: "full" | "readonly" | "unknown";
-};
-
 export type IntegrationConnectionAgentAccess = {
   agentId: string;
   agentName: string;
@@ -89,7 +84,8 @@ export type IntegrationConnectionOverview = {
   ownerAgentName: string;
   status: GoogleAccountRecord["status"];
   accessLevel: GoogleAccessLevel;
-  serviceScopes: IntegrationServiceScopeSummary[];
+  accessLabel: string;
+  scopeBadges: string[];
   agentAccess: IntegrationConnectionAgentAccess[];
   createdAt: number;
   updatedAt: number;
@@ -138,6 +134,23 @@ async function listAgents(): Promise<IntegrationAgentSummary[]> {
   }
 }
 
+function listAgentsFromConfig(config: Awaited<ReturnType<typeof fetchConfig>>): IntegrationAgentSummary[] {
+  return extractAgentsList(config)
+    .filter((entry) => entry.id)
+    .map((entry) => ({
+      id: entry.id,
+      name:
+        typeof entry.name === "string" && entry.name.trim()
+          ? entry.name.trim()
+          : entry.id,
+      isDefault: entry.default === true,
+    }))
+    .sort(
+      (a, b) =>
+        Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name),
+    );
+}
+
 function accessLevelLabel(accessLevel: GoogleAccessLevel | "none") {
   switch (accessLevel) {
     case "read-only":
@@ -154,10 +167,11 @@ function accessLevelLabel(accessLevel: GoogleAccessLevel | "none") {
 }
 
 function providerCatalog(
-  store: GoogleIntegrationsStore,
-  agents: IntegrationAgentSummary[],
+  googleConnections: IntegrationConnectionOverview[],
+  slackConnections: IntegrationConnectionOverview[],
 ): IntegrationProviderOverview[] {
-  const ownedGoogleAgents = new Set(store.accounts.map((account) => account.ownerAgentId));
+  const ownedGoogleAgents = new Set(googleConnections.map((connection) => connection.ownerAgentId));
+  const ownedSlackAgents = new Set(slackConnections.map((connection) => connection.ownerAgentId));
 
   return [
     {
@@ -165,7 +179,7 @@ function providerCatalog(
       label: "Google Workspace",
       description: "Gmail, Calendar, Drive and Gmail watch",
       status: "live",
-      connectionCount: store.accounts.length,
+      connectionCount: googleConnections.length,
       agentCount: ownedGoogleAgents.size,
       createEnabled: true,
       manageLabel: "Connect Google",
@@ -194,11 +208,11 @@ function providerCatalog(
       key: "slack",
       label: "Slack",
       description: "Team-facing channels and routing",
-      status: "planned",
-      connectionCount: 0,
-      agentCount: 0,
+      status: slackConnections.length > 0 ? "live" : "planned",
+      connectionCount: slackConnections.length,
+      agentCount: ownedSlackAgents.size,
       createEnabled: false,
-      manageLabel: "Coming soon",
+      manageLabel: slackConnections.length > 0 ? "Managed in OpenClaw" : "Coming soon",
     },
   ] satisfies IntegrationProviderOverview[];
 }
@@ -220,12 +234,11 @@ function buildConnectionOverview(
       ownerAgentName: agentNameById.get(account.ownerAgentId) || account.ownerAgentId,
       status: account.status,
       accessLevel: account.accessLevel,
-      serviceScopes: GOOGLE_SERVICES.map((service) => ({
-        service,
-        enabled: account.serviceStates[service].enabled,
-        apiStatus: account.serviceStates[service].apiStatus,
-        scopeStatus: account.serviceStates[service].scopeStatus,
-      })),
+      accessLabel: accessLevelLabel(account.accessLevel),
+      scopeBadges: GOOGLE_SERVICES.map((service) => {
+        const scope = account.serviceStates[service].scopeStatus;
+        return `${service} ${scope}`;
+      }),
       agentAccess: agents.map((agent) => ({
         agentId: agent.id,
         agentName: agent.name,
@@ -244,19 +257,122 @@ function buildConnectionOverview(
     .sort((a, b) => b.updatedAt - a.updatedAt || a.label.localeCompare(b.label));
 }
 
+function buildSlackConnections(
+  configData: Awaited<ReturnType<typeof fetchConfig>>,
+  agents: IntegrationAgentSummary[],
+  channelStatus: Record<string, unknown>,
+): IntegrationConnectionOverview[] {
+  const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
+  const bindings = extractBindings(configData).filter(
+    (binding) => binding.agentId && binding.match.channel === "slack",
+  );
+
+  const resolvedChannels =
+    configData.resolved &&
+    typeof configData.resolved.channels === "object" &&
+    configData.resolved.channels !== null
+      ? (configData.resolved.channels as Record<string, unknown>)
+      : {};
+  const slackConfig =
+    resolvedChannels.slack && typeof resolvedChannels.slack === "object"
+      ? (resolvedChannels.slack as Record<string, unknown>)
+      : null;
+  const slackAccountsConfig =
+    slackConfig?.accounts && typeof slackConfig.accounts === "object"
+      ? (slackConfig.accounts as Record<string, unknown>)
+      : {};
+
+  const accountsByChannel = Array.isArray((channelStatus.channelAccounts as Record<string, unknown> | undefined)?.slack)
+    ? ((channelStatus.channelAccounts as Record<string, unknown>).slack as Array<Record<string, unknown>>)
+    : [];
+  const slackChannelState =
+    channelStatus.channels &&
+    typeof channelStatus.channels === "object" &&
+    channelStatus.channels !== null &&
+    typeof (channelStatus.channels as Record<string, unknown>).slack === "object"
+      ? ((channelStatus.channels as Record<string, unknown>).slack as Record<string, unknown>)
+      : null;
+
+  const deduped = new Map<string, { agentId: string; accountId: string }>();
+  for (const binding of bindings) {
+    const accountId = binding.match.accountId?.trim() || "default";
+    deduped.set(`${binding.agentId}:${accountId}`, {
+      agentId: binding.agentId,
+      accountId,
+    });
+  }
+
+  return Array.from(deduped.values()).map(({ agentId, accountId }) => {
+    const runtimeAccount = accountsByChannel.find((entry) => {
+      const value = typeof entry.accountId === "string" ? entry.accountId.trim() : "default";
+      return value === accountId;
+    });
+    const connected =
+      runtimeAccount?.running === true ||
+      runtimeAccount?.connected === true ||
+      runtimeAccount?.linked === true ||
+      slackChannelState?.running === true;
+    const accountConfigured =
+      typeof slackAccountsConfig[accountId] === "object" ||
+      (accountId === "default" && typeof slackAccountsConfig.default === "object");
+    const configured =
+      connected ||
+      accountConfigured ||
+      runtimeAccount?.configured === true ||
+      slackChannelState?.configured === true ||
+      slackConfig?.enabled === true;
+    const status: GoogleAccountRecord["status"] = connected
+      ? "connected"
+      : configured
+        ? "limited-access"
+        : "pending";
+
+    return {
+      id: `slack:${agentId}:${accountId}`,
+      providerKey: "slack",
+      providerLabel: "Slack",
+      label: accountId === "default" ? "Slack default binding" : `Slack ${accountId}`,
+      externalRef: `slack:${accountId}`,
+      ownerAgentId: agentId,
+      ownerAgentName: agentNameById.get(agentId) || agentId,
+      status,
+      accessLevel: "custom",
+      accessLabel: connected ? "Slack live" : configured ? "Configured channel" : "Pending setup",
+      scopeBadges: [
+        `channel slack`,
+        `account ${accountId}`,
+        connected ? "connected" : configured ? "configured" : "pending",
+      ],
+      agentAccess: agents.map((agent) => ({
+        agentId: agent.id,
+        agentName: agent.name,
+        relation: (agent.id === agentId ? "owner" : "none") as "owner" | "none",
+        accessLevel: (agent.id === agentId ? "custom" : "none") as GoogleAccessLevel | "none",
+        summary: agent.id === agentId ? "Slack binding" : "No access",
+      })),
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  });
+}
+
 function buildAgentMatrix(
-  store: GoogleIntegrationsStore,
+  googleConnections: IntegrationConnectionOverview[],
+  slackConnections: IntegrationConnectionOverview[],
   agents: IntegrationAgentSummary[],
 ): IntegrationAgentMatrixRow[] {
   return agents.map((agent) => {
-    const ownedGoogleConnections = store.accounts.filter(
+    const ownedGoogleConnections = googleConnections.filter(
       (account) => account.ownerAgentId === agent.id,
+    );
+    const ownedSlackConnections = slackConnections.filter(
+      (connection) => connection.ownerAgentId === agent.id,
     );
     const googleSummary =
       ownedGoogleConnections.length === 0
         ? "No access"
         : ownedGoogleConnections.length === 1
-          ? `${accessLevelLabel(ownedGoogleConnections[0].accessLevel)} · ${ownedGoogleConnections[0].email}`
+          ? `${accessLevelLabel(ownedGoogleConnections[0].accessLevel)} · ${ownedGoogleConnections[0].externalRef}`
           : `${ownedGoogleConnections.length} owned connections`;
 
     return {
@@ -288,8 +404,13 @@ function buildAgentMatrix(
         {
           providerKey: "slack",
           providerLabel: "Slack",
-          connectionCount: 0,
-          summary: "Not configured",
+          connectionCount: ownedSlackConnections.length,
+          summary:
+            ownedSlackConnections.length === 0
+              ? "Not configured"
+              : ownedSlackConnections.length === 1
+                ? ownedSlackConnections[0].accessLabel
+                : `${ownedSlackConnections.length} bindings`,
           createEnabled: false,
         },
       ],
@@ -422,9 +543,13 @@ export function buildAccountDiagnostics(
 }
 
 export async function buildGoogleIntegrationsSnapshot(agentId: string | null = null) {
-  const [store, agents, gogAvailability, authStatus, storedAccounts] = await Promise.all([
+  const [store, configData, gogAvailability, authStatus, storedAccounts, channelStatus] = await Promise.all([
     readGoogleIntegrationsStore(),
-    listAgents(),
+    fetchConfig().catch(() => ({
+      parsed: {},
+      resolved: {},
+      hash: "",
+    })),
     getGogAvailability().catch(() => ({
       available: false,
       bin: null,
@@ -437,7 +562,9 @@ export async function buildGoogleIntegrationsSnapshot(agentId: string | null = n
       serviceAccountConfigured: false,
     })),
     listGogStoredAccounts().catch(() => []),
+    gatewayCall<Record<string, unknown>>("channels.status", {}, 5000).catch(() => ({})),
   ]);
+  const agents = listAgentsFromConfig(configData);
 
   const selectedAgentId =
     agentId && agents.some((entry) => entry.id === agentId)
@@ -447,10 +574,14 @@ export async function buildGoogleIntegrationsSnapshot(agentId: string | null = n
     ? store.accounts.filter((account) => accountOwnedByAgent(account, selectedAgentId))
     : [];
   const visibleAccountIds = new Set(visibleAccounts.map((account) => account.id));
+  const googleConnections = buildConnectionOverview(store, agents);
+  const slackConnections = buildSlackConnections(configData, agents, channelStatus);
   const overview: IntegrationsOverview = {
-    providers: providerCatalog(store, agents),
-    connections: buildConnectionOverview(store, agents),
-    agentMatrix: buildAgentMatrix(store, agents),
+    providers: providerCatalog(googleConnections, slackConnections),
+    connections: [...googleConnections, ...slackConnections].sort(
+      (a, b) => b.updatedAt - a.updatedAt || a.label.localeCompare(b.label),
+    ),
+    agentMatrix: buildAgentMatrix(googleConnections, slackConnections, agents),
   };
 
   return {
