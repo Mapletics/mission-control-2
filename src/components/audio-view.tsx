@@ -1478,10 +1478,9 @@ export function AudioView() {
       const json = await res.json();
       if (json.ok) {
         setToast({
-          message: "Talk Mode enabled. Refreshing after gateway restart…",
+          message: "Talk Mode enabled. Refreshing configuration…",
           type: "success",
         });
-        requestRestart("Talk Mode was enabled.");
         // Show as enabled immediately (parsed talk section will exist after patch)
         setData((prev) => {
           if (!prev) return prev;
@@ -1496,8 +1495,8 @@ export function AudioView() {
             },
           };
         });
-        // Refetch after a delay so the restarted gateway is up and we get fresh config
-        await new Promise((r) => setTimeout(r, 2500));
+        // Give the gateway a moment to apply the patch before reloading the view state.
+        await new Promise((r) => setTimeout(r, 1200));
         await fetchData();
       } else {
         setToast({ message: json.error || "Failed to enable Talk Mode", type: "error" });
