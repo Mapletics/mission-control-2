@@ -5,27 +5,21 @@ import { useSmartPoll } from "@/hooks/use-smart-poll";
 import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
-  BookOpen,
   CalendarDays,
   CheckCircle2,
   Eye,
   ExternalLink,
-  GitBranch,
   HardDrive,
   Inbox,
   Mail,
   MailCheck,
   MailPlus,
-  MessageSquare,
-  Network,
   Plus,
   RefreshCw,
   Search,
   Send,
   Shield,
-  ShieldAlert,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +29,9 @@ import { SectionBody, SectionHeader, SectionLayout } from "@/components/section-
 import { InlineSpinner, LoadingState } from "@/components/ui/loading-state";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { AddIntegrationSection } from "@/components/integrations/add-integration-section";
+import { OverviewSection } from "@/components/integrations/overview-section";
+import { SlackConnectionDetails } from "@/components/integrations/slack-connection-details";
 
 type AgentSummary = {
   id: string;
@@ -299,48 +296,6 @@ const POLICY_OPTIONS = [
   { value: "ask", label: "Requires Approval" },
   { value: "allow", label: "Allowed" },
 ] as const;
-
-const PROVIDER_ORDER: Array<IntegrationProviderKey | "all"> = [
-  "all",
-  "google-workspace",
-  "github",
-  "notion",
-  "slack",
-];
-
-function providerIcon(key: IntegrationProviderKey) {
-  switch (key) {
-    case "google-workspace":
-      return HardDrive;
-    case "github":
-      return GitBranch;
-    case "notion":
-      return BookOpen;
-    case "slack":
-      return MessageSquare;
-  }
-}
-
-function providerStatusTone(status: IntegrationProviderOverview["status"]) {
-  return status === "live"
-    ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-    : "border-stone-300 bg-stone-100 text-stone-700 dark:border-[#30363d] dark:bg-[#171b1f] dark:text-[#a8b0ba]";
-}
-
-function accessTone(accessLevel: AccountRecord["accessLevel"] | "none") {
-  switch (accessLevel) {
-    case "read-write":
-      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-    case "read-draft":
-      return "border-blue-500/20 bg-blue-500/10 text-blue-700 dark:text-blue-300";
-    case "read-only":
-      return "border-stone-300 bg-stone-100 text-stone-700 dark:border-[#30363d] dark:bg-[#171b1f] dark:text-[#c7d0d9]";
-    case "custom":
-      return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300";
-    default:
-      return "border-stone-300 bg-transparent text-stone-500 dark:border-[#30363d] dark:text-[#8d98a5]";
-  }
-}
 
 function formatAgo(ts: number | null): string {
   if (!ts) return "Never";
@@ -991,538 +946,69 @@ export function IntegrationsView() {
           ) : null}
 
           {activeView === "overview" ? (
-            <>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                <Card>
-                  <CardContent className="flex items-center justify-between p-5">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
-                        Providers
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-stone-900 dark:text-[#f5f7fa]">
-                        {providerOverview.length}
-                      </p>
-                      <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
-                        Google and Slack are live, with room for more.
-                      </p>
-                    </div>
-                    <Network className="h-8 w-8 text-stone-400 dark:text-[#8d98a5]" />
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="flex items-center justify-between p-5">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
-                        Connections
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-stone-900 dark:text-[#f5f7fa]">
-                        {data?.overview.connections.length || 0}
-                      </p>
-                      <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
-                        Owned credentials with explicit agent binding.
-                      </p>
-                    </div>
-                    <Shield className="h-8 w-8 text-stone-400 dark:text-[#8d98a5]" />
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="flex items-center justify-between p-5">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
-                        Agents With Access
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-stone-900 dark:text-[#f5f7fa]">
-                        {googleProviderOverview?.agentCount || 0}
-                      </p>
-                      <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
-                        Google owners are isolated per agent.
-                      </p>
-                    </div>
-                    <Sparkles className="h-8 w-8 text-stone-400 dark:text-[#8d98a5]" />
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="flex items-center justify-between p-5">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
-                        Pending Approvals
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-stone-900 dark:text-[#f5f7fa]">
-                        {pendingApprovals.length}
-                      </p>
-                      <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
-                        Approval queue for the selected agent.
-                      </p>
-                    </div>
-                    <ShieldAlert className="h-8 w-8 text-stone-400 dark:text-[#8d98a5]" />
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Existing Integrations</CardTitle>
-                    <CardDescription>
-                      Start here. Review current providers first, then add a new one only when needed.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="grid gap-4 md:grid-cols-2">
-                    {providerOverview.map((provider) => {
-                      const ProviderIcon = providerIcon(provider.key);
-                      return (
-                        <div
-                          key={provider.key}
-                          className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-stone-50 dark:border-[#30363d] dark:bg-[#111418]">
-                                <ProviderIcon className="h-5 w-5 text-stone-700 dark:text-[#c7d0d9]" />
-                              </div>
-                              <div>
-                                <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
-                                  {provider.label}
-                                </p>
-                                <p className="text-sm text-stone-500 dark:text-[#8d98a5]">
-                                  {provider.description}
-                                </p>
-                              </div>
-                            </div>
-                            <Badge className={cn("border", providerStatusTone(provider.status))}>
-                              {provider.status === "live" ? "Live" : "Planned"}
-                            </Badge>
-                          </div>
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            <Badge variant="outline">{provider.connectionCount} connections</Badge>
-                            <Badge variant="outline">{provider.agentCount} agents</Badge>
-                          </div>
-                          <div className="mt-4">
-                            <Button
-                              type="button"
-                              variant={provider.createEnabled ? "default" : "outline"}
-                              className="w-full justify-between"
-                              onClick={() => handleNewIntegration(provider.key)}
-                            >
-                              <span>{provider.manageLabel}</span>
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Agent Access Matrix</CardTitle>
-                    <CardDescription>
-                      Direct overview of which agent owns which integration surface.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {agentMatrixRows.map((row) => (
-                      <div
-                        key={row.agentId}
-                        className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]"
-                      >
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
-                            {row.agentName}
-                          </p>
-                          {row.isDefault ? <Badge variant="outline">default</Badge> : null}
-                        </div>
-                        <div className="mt-3 grid gap-2">
-                          {row.providers.map((provider) => (
-                            <div
-                              key={`${row.agentId}-${provider.providerKey}`}
-                              className="flex items-center justify-between rounded-lg border border-stone-200/80 px-3 py-2 text-sm dark:border-[#23282e]"
-                            >
-                              <div>
-                                <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
-                                  {provider.providerLabel}
-                                </p>
-                                <p className="text-xs text-stone-500 dark:text-[#8d98a5]">
-                                  {provider.summary}
-                                </p>
-                              </div>
-                              <Badge variant="outline">
-                                {provider.connectionCount > 0 ? `${provider.connectionCount} linked` : "none"}
-                              </Badge>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              </div>
-
-              <Card>
-                <CardHeader>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <CardTitle>Connection Directory</CardTitle>
-                      <CardDescription>
-                        Existing connections only. Open one to move into its detail screen.
-                      </CardDescription>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {PROVIDER_ORDER.map((key) => (
-                        <Button
-                          key={key}
-                          type="button"
-                          size="sm"
-                          variant={providerFilter === key ? "default" : "outline"}
-                          onClick={() => setProviderFilter(key)}
-                        >
-                          {key === "all"
-                            ? "All"
-                            : providerOverview.find((provider) => provider.key === key)?.label || key}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {visibleOverviewConnections.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-stone-300 p-4 text-sm text-stone-600 dark:border-[#30363d] dark:text-[#a8b0ba]">
-                      No connections for this filter yet.
-                    </div>
-                  ) : null}
-                  {visibleOverviewConnections.map((connection) => (
-                    <button
-                      key={connection.id}
-                      type="button"
-                      onClick={() => void handleOpenOverviewConnection(connection)}
-                      className="w-full rounded-xl border border-stone-200/80 p-4 text-left transition-colors hover:border-stone-300 dark:border-[#23282e] dark:hover:border-[#30363d]"
-                    >
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
-                              {connection.label}
-                            </p>
-                            <Badge variant="outline">{connection.providerLabel}</Badge>
-                            <Badge className={cn("border", statusTone(connection.status))}>
-                              {connection.status}
-                            </Badge>
-                          </div>
-                          <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
-                            {connection.externalRef}
-                          </p>
-                        </div>
-                        <div className="text-right text-sm text-stone-500 dark:text-[#8d98a5]">
-                          <p>Owner</p>
-                          <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
-                            {connection.ownerAgentName}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Badge className={cn("border", accessTone(connection.accessLevel))}>
-                          {connection.accessLabel}
-                        </Badge>
-                        {connection.scopeBadges.map((scope) => (
-                          <Badge key={`${connection.id}-${scope}`} variant="outline">
-                            {scope}
-                          </Badge>
-                        ))}
-                      </div>
-                    </button>
-                  ))}
-                </CardContent>
-              </Card>
-            </>
+            <OverviewSection
+              providerOverview={providerOverview}
+              googleAgentCount={googleProviderOverview?.agentCount || 0}
+              pendingApprovalsCount={pendingApprovals.length}
+              connectionCount={data?.overview.connections.length || 0}
+              agentMatrixRows={agentMatrixRows}
+              providerFilter={providerFilter}
+              visibleOverviewConnections={visibleOverviewConnections}
+              onProviderFilterChange={setProviderFilter}
+              onProviderCreate={handleNewIntegration}
+              onConnectionOpen={(connection) => void handleOpenOverviewConnection(connection)}
+            />
           ) : null}
 
           {activeView === "add" ? (
-            <>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Add Integration</CardTitle>
-                  <CardDescription>
-                    Pick the provider first. Setup appears only after you choose one.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                  {providerOverview.map((provider) => {
-                    const ProviderIcon = providerIcon(provider.key);
-                    const active = selectedAddProvider === provider.key;
-                    return (
-                      <button
-                        key={provider.key}
-                        type="button"
-                        onClick={() => setSelectedAddProvider(provider.key)}
-                        className={cn(
-                          "rounded-xl border p-4 text-left transition-colors",
-                          active
-                            ? "border-blue-500/50 bg-blue-500/5"
-                            : "border-stone-200/80 hover:border-stone-300 dark:border-[#23282e] dark:hover:border-[#30363d]",
-                        )}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-stone-50 dark:border-[#30363d] dark:bg-[#111418]">
-                              <ProviderIcon className="h-5 w-5 text-stone-700 dark:text-[#c7d0d9]" />
-                            </div>
-                            <div>
-                              <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">{provider.label}</p>
-                              <p className="text-sm text-stone-500 dark:text-[#8d98a5]">{provider.description}</p>
-                            </div>
-                          </div>
-                          <Badge className={cn("border", providerStatusTone(provider.status))}>
-                            {provider.status === "live" ? "Live" : "Planned"}
-                          </Badge>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </CardContent>
-              </Card>
-
-              {selectedAddProvider && selectedAddProvider !== "google-workspace" ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>
-                      {providerOverview.find((provider) => provider.key === selectedAddProvider)?.label || "Provider"} setup
-                    </CardTitle>
-                    <CardDescription>
-                      {selectedAddProvider === "slack"
-                        ? "Slack is already read live from the gateway. The next cleanup step is to move its create and edit flow into this dedicated setup screen."
-                        : "This provider already has a slot in the model, but the setup flow is not wired yet."}
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
-              ) : null}
-            </>
+            <AddIntegrationSection
+              providerOverview={providerOverview}
+              selectedAddProvider={selectedAddProvider}
+              runtime={data!.runtime}
+              slackConnectionCount={slackProviderOverview?.connectionCount || 0}
+              selectedAgentId={selectedAgentId}
+              selectedAgentName={selectedAgent?.name || selectedAgentId || "the selected agent"}
+              agents={data?.agents || []}
+              connectEmail={connectEmail}
+              connectAccessLevel={connectAccessLevel}
+              actionBusy={actionBusy}
+              onSelectProvider={setSelectedAddProvider}
+              onAgentChange={(agentId) => void syncAgentSelection(agentId)}
+              onConnectEmailChange={setConnectEmail}
+              onConnectAccessLevelChange={setConnectAccessLevel}
+              onStartConnect={() =>
+                void runAction("start-connect", {
+                  email: connectEmail,
+                  accessLevel: connectAccessLevel,
+                  agentId: selectedAgentId,
+                })
+              }
+              onImportExisting={() =>
+                void runAction("import-existing-account", {
+                  email: connectEmail,
+                  accessLevel: connectAccessLevel,
+                  agentId: selectedAgentId,
+                })
+              }
+              onReuseStoredAccount={(account) =>
+                account.source === "keychain-fallback"
+                  ? void runAction("start-connect", {
+                      email: account.email,
+                      accessLevel: connectAccessLevel,
+                      agentId: selectedAgentId,
+                    })
+                  : void runAction("import-existing-account", {
+                      email: account.email,
+                      accessLevel: connectAccessLevel,
+                      agentId: selectedAgentId,
+                    })
+              }
+            />
           ) : null}
 
-          {activeView !== "overview" ? (
+          {activeView === "details" ? (
           <div className="grid gap-6 lg:grid-cols-[1.05fr_1.95fr]">
             <div className="space-y-6">
-              {activeView === "add" && selectedAddProvider === "google-workspace" ? (
-              <Card id="connect-google">
-                <CardHeader>
-                  <CardTitle>Runtime</CardTitle>
-                  <CardDescription>
-                    Google setup depends on gateway runtime, OAuth credentials, and existing gog accounts.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3 text-sm">
-                  <div className="flex items-center justify-between rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
-                    <span>Slack runtime</span>
-                    <Badge className={cn("border", slackProviderOverview?.status === "live" ? statusTone("connected") : serviceStatusTone("unverified"))}>
-                      {slackProviderOverview?.status === "live"
-                        ? `${slackProviderOverview.connectionCount} linked`
-                        : "Not detected"}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
-                    <span>gog runtime</span>
-                    <Badge className={cn("border", data?.runtime.gog.available ? statusTone("connected") : statusTone("error"))}>
-                      {data?.runtime.gog.available ? "Available" : "Unavailable"}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
-                    <span>OAuth client</span>
-                    <Badge className={cn("border", data?.runtime.auth.credentialsExists ? statusTone("connected") : serviceStatusTone("unverified"))}>
-                      {data?.runtime.auth.credentialsExists ? "Configured" : "Using gog default client"}
-                    </Badge>
-                  </div>
-                  <div className="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
-                    <div className="flex items-center justify-between">
-                      <span>Stored Google accounts</span>
-                      <span className="text-sm font-medium">{data?.runtime.storedAccounts.length || 0}</span>
-                    </div>
-                    {(data?.runtime.storedAccounts.length ?? 0) > 0 && (
-                      <div className="mt-2 space-y-1">
-                        {data!.runtime.storedAccounts.map((acct) => (
-                          <div
-                            key={acct.email}
-                            className="flex items-center gap-2 rounded px-2 py-1 text-xs text-stone-600 dark:bg-[#101214] dark:text-[#a8b0ba]"
-                          >
-                            <Mail className="h-3 w-3 shrink-0 opacity-60" />
-                            <span className="truncate">{acct.email}</span>
-                            {acct.source === "keychain-fallback" ? (
-                              <Badge variant="outline" className="ml-auto shrink-0 border-amber-500/30 px-1 py-0 text-[10px] text-amber-600 dark:text-amber-400">
-                                needs re-auth
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="ml-auto shrink-0 border-emerald-500/30 px-1 py-0 text-[10px] text-emerald-600 dark:text-emerald-400">
-                                ready
-                              </Badge>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {data?.runtime.storedAccounts.every((a) => a.source === "keychain-fallback") && (data?.runtime.storedAccounts.length ?? 0) > 0 && (
-                      <p className="mt-2 text-[11px] text-amber-600 dark:text-amber-400">
-                        Tokens found in macOS Keychain but not recognized by gog. Use Connect Google below to re-authorize.
-                      </p>
-                    )}
-                  </div>
-                  <p className="text-xs text-stone-500 dark:text-[#a8b0ba]">
-                    Keyring backend: {data?.runtime.auth.keyringBackend || "unknown"} · source:{" "}
-                    {data?.runtime.auth.keyringSource || "unknown"}
-                  </p>
-                </CardContent>
-              </Card>
-              ) : null}
-
-              {activeView === "add" && selectedAddProvider === "google-workspace" ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Connect Google</CardTitle>
-                  <CardDescription>
-                    Connect one Google account to exactly one agent. The default safe option is Read Only.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
-                      Target agent
-                    </label>
-                    <select
-                      className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm dark:border-[#30363d] dark:bg-[#0f1318]"
-                      value={selectedAgentId}
-                      onChange={(event) => void syncAgentSelection(event.target.value)}
-                    >
-                      {(data?.agents || []).map((agent) => (
-                        <option key={agent.id} value={agent.id}>
-                          {agent.name}
-                          {agent.isDefault ? " (default)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
-                      Google account email
-                    </label>
-                    <Input
-                      value={connectEmail}
-                      onChange={(event) => setConnectEmail(event.target.value)}
-                      placeholder="you@company.com"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
-                      Connection access
-                    </label>
-                    <select
-                      className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm dark:border-[#30363d] dark:bg-[#0f1318]"
-                      value={connectAccessLevel}
-                      onChange={(event) => setConnectAccessLevel(event.target.value as AccountRecord["accessLevel"])}
-                    >
-                      <option value="read-only">Read Only</option>
-                      <option value="read-draft">Read + Draft</option>
-                      <option value="read-write">Read + Write</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                  </div>
-                  <div className="rounded-lg border border-stone-200/80 bg-stone-50 p-3 text-sm text-stone-600 dark:border-[#23282e] dark:bg-[#111418] dark:text-[#a8b0ba]">
-                    <p className="mb-2 text-xs font-medium text-stone-700 dark:text-[#d8dee6]">
-                      This connection will belong only to {selectedAgent?.name || selectedAgentId || "the selected agent"}.
-                    </p>
-                    {connectAccessLevel === "read-only" && "The assistant can look things up, but cannot send or change anything."}
-                    {connectAccessLevel === "read-draft" && "The assistant can read and prepare drafts, but you keep control before anything is sent."}
-                    {connectAccessLevel === "read-write" && "The assistant can read and take approved actions like replying or creating events."}
-                    {connectAccessLevel === "custom" && "Custom mode lets you turn specific capabilities on or off after the account is connected."}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      onClick={() =>
-                        void runAction("start-connect", {
-                          email: connectEmail,
-                          accessLevel: connectAccessLevel,
-                          agentId: selectedAgentId,
-                        })
-                      }
-                      disabled={!connectEmail.trim() || actionBusy !== null}
-                    >
-                      {actionBusy === "start-connect" ? <InlineSpinner className="mr-2 h-4 w-4" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                      Start Browser-Safe Connect
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() =>
-                        void runAction("import-existing-account", {
-                          email: connectEmail,
-                          accessLevel: connectAccessLevel,
-                          agentId: selectedAgentId,
-                        })
-                      }
-                      disabled={!connectEmail.trim() || actionBusy !== null}
-                    >
-                      Import Existing gog Account
-                    </Button>
-                  </div>
-                  {data?.runtime.storedAccounts.length ? (
-                    <div className="rounded-xl border border-stone-200/80 p-3 dark:border-[#23282e]">
-                      <p className="text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">
-                        Detected existing Google accounts
-                      </p>
-                      <div className="mt-3 space-y-2">
-                        {data.runtime.storedAccounts.map((account) => (
-                          <div
-                            key={account.email}
-                            className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]"
-                          >
-                            <div>
-                              <p className="text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">
-                                {account.email}
-                              </p>
-                              <p className="text-xs text-stone-500 dark:text-[#7a8591]">
-                                {account.source === "keychain-fallback"
-                                  ? "Found in macOS Keychain but needs re-authorization through gog."
-                                  : "Available in gog. Import it to manage permissions here."}
-                              </p>
-                            </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                account.source === "keychain-fallback"
-                                  ? void runAction("start-connect", {
-                                      email: account.email,
-                                      accessLevel: connectAccessLevel,
-                                      agentId: selectedAgentId,
-                                    })
-                                  : void runAction("import-existing-account", {
-                                      email: account.email,
-                                      accessLevel: connectAccessLevel,
-                                      agentId: selectedAgentId,
-                                    })
-                              }
-                              disabled={actionBusy !== null}
-                            >
-                              {account.source === "keychain-fallback" ? "Re-authorize" : "Import"}
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="rounded-lg border border-dashed border-stone-300 p-3 text-sm dark:border-[#30363d]">
-                    <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">For non-technical users</p>
-                    <ol className="mt-2 list-decimal space-y-1 pl-5 text-stone-600 dark:text-[#a8b0ba]">
-                      <li>Click <strong>Start Browser-Safe Connect</strong>.</li>
-                      <li>Sign in to Google in the new tab.</li>
-                      <li>After Google redirects you, copy the full final browser URL.</li>
-                      <li>Paste it into the “Finish connection” box below and click finish.</li>
-                    </ol>
-                  </div>
-                </CardContent>
-              </Card>
-              ) : null}
-
-              {activeView === "details" ? (
               <Card>
                 <CardHeader>
                   <CardTitle>Accounts</CardTitle>
@@ -1580,9 +1066,6 @@ export function IntegrationsView() {
                   ))}
                 </CardContent>
               </Card>
-              ) : null}
-
-              {activeView === "details" ? (
               <Card id="slack-connections">
                 <CardHeader>
                   <CardTitle>Slack connections</CardTitle>
@@ -1631,20 +1114,9 @@ export function IntegrationsView() {
                   ))}
                 </CardContent>
               </Card>
-              ) : null}
             </div>
 
             <div className="space-y-6">
-              {activeView === "add" && selectedAddProvider === "google-workspace" ? (
-                <Card className="border-dashed border-stone-300/80 dark:border-[#30363d]">
-                  <CardHeader>
-                    <CardTitle>What happens next</CardTitle>
-                    <CardDescription>
-                      Start the browser-safe Google flow here. Once the account is created, this screen will switch into connection details automatically.
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
-              ) : null}
               {activeView === "details" && (
                 <>
               {!selectedAccount && !selectedSlackConnection ? (
@@ -1657,98 +1129,13 @@ export function IntegrationsView() {
                   </CardHeader>
                 </Card>
               ) : selectedSlackConnection ? (
-                <div id="connection-details" className="space-y-6">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="justify-start px-0 text-stone-600 hover:bg-transparent hover:text-stone-900 dark:text-[#a8b0ba] dark:hover:text-[#f5f7fa]"
-                      onClick={() => {
-                        setSelectedSlackConnectionId("");
-                        setActiveView("overview");
-                      }}
-                    >
-                      Back
-                    </Button>
-                    <Badge className={cn("border", statusTone(selectedSlackConnection.status))}>
-                      {selectedSlackConnection.running ? "Slack live" : selectedSlackConnection.configured ? "Configured" : "Pending"}
-                    </Badge>
-                  </div>
-
-                  <Card className="border-dashed border-stone-300/80 dark:border-[#30363d]">
-                    <CardContent className="space-y-6 p-5">
-                      <section className="space-y-2">
-                        <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">
-                          Agent Ownership
-                        </p>
-                        <h2 className="text-sm font-semibold text-stone-900 dark:text-[#f5f7fa]">
-                          {selectedSlackConnection.ownerAgentName}
-                        </h2>
-                        <p className="text-xs text-stone-500 dark:text-[#8d98a5]">
-                          This Slack connection is routed to exactly one agent. The dashboard reads it live from the OpenClaw gateway, but edits still stay OpenClaw-managed for now.
-                        </p>
-                        <div className="grid gap-3 md:grid-cols-3">
-                          <div className="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
-                            <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">Owner</p>
-                            <p className="mt-1 text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">{selectedSlackConnection.ownerAgentName}</p>
-                          </div>
-                          <div className="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
-                            <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">Slack account</p>
-                            <p className="mt-1 text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">{selectedSlackConnection.accountId}</p>
-                          </div>
-                          <div className="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
-                            <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">Bindings</p>
-                            <p className="mt-1 text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">{selectedSlackConnection.bindingCount}</p>
-                          </div>
-                        </div>
-                      </section>
-
-                      <section className="space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge className={cn("border", accessTone(selectedSlackConnection.accessLevel))}>
-                            {selectedSlackConnection.accessLabel}
-                          </Badge>
-                          {selectedSlackConnection.scopeBadges.map((scope) => (
-                            <Badge key={`${selectedSlackConnection.id}-${scope}`} variant="outline">
-                              {scope}
-                            </Badge>
-                          ))}
-                        </div>
-                        <div className="rounded-xl border border-stone-200/80 bg-white p-4 dark:border-[#2c343d] dark:bg-[#171a1d]">
-                          <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">
-                            Allowed channels
-                          </p>
-                          {selectedSlackConnection.allowedChannels.length === 0 ? (
-                            <p className="mt-2 text-sm text-stone-500 dark:text-[#a8b0ba]">
-                              No explicit channel allowlist detected for this Slack account.
-                            </p>
-                          ) : (
-                            <div className="mt-3 grid gap-2">
-                              {selectedSlackConnection.allowedChannels.map((channel) => (
-                                <div
-                                  key={`${selectedSlackConnection.id}-${channel.channelId}`}
-                                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]"
-                                >
-                                  <div>
-                                    <p className="text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">
-                                      {channel.channelId}
-                                    </p>
-                                    <p className="text-xs text-stone-500 dark:text-[#8d98a5]">
-                                      {channel.requireMention ? "Requires @mention" : "Can respond without mention"}
-                                    </p>
-                                  </div>
-                                  <Badge variant="outline">
-                                    {channel.allow ? "allowed" : "blocked"}
-                                  </Badge>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </section>
-                    </CardContent>
-                  </Card>
-                </div>
+                <SlackConnectionDetails
+                  connection={selectedSlackConnection}
+                  onBack={() => {
+                    setSelectedSlackConnectionId("");
+                    setActiveView("overview");
+                  }}
+                />
               ) : selectedAccount ? (
                 <>
                   {selectedAccount.pendingAuthUrl ? (
