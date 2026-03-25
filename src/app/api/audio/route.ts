@@ -460,12 +460,32 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(providers);
     }
 
-    // Default: full status + providers + config
-    const [status, providers, configData] = await Promise.all([
-      gatewayCall<Record<string, unknown>>("tts.status", undefined, 10000),
-      gatewayCall<Record<string, unknown>>("tts.providers", undefined, 10000),
-      fetchConfig(10000),
+    // Default: full status + providers + config. Each source degrades independently
+    // so the Audio page can render even while the gateway is still warming up.
+    const warnings: string[] = [];
+    const [statusResult, providersResult, configResult] = await Promise.allSettled([
+      gatewayCall<Record<string, unknown>>("tts.status", undefined, 5000),
+      gatewayCall<Record<string, unknown>>("tts.providers", undefined, 5000),
+      fetchConfig(6000),
     ]);
+
+    const status =
+      statusResult.status === "fulfilled"
+        ? statusResult.value
+        : (warnings.push(`tts.status unavailable: ${String(statusResult.reason)}`),
+          { enabled: false, auto: "off", provider: "" });
+
+    const providers =
+      providersResult.status === "fulfilled"
+        ? providersResult.value
+        : (warnings.push(`tts.providers unavailable: ${String(providersResult.reason)}`),
+          { providers: [], active: "" });
+
+    const configData =
+      configResult.status === "fulfilled"
+        ? configResult.value
+        : (warnings.push(`config.get unavailable: ${String(configResult.reason)}`),
+          { parsed: {}, resolved: {}, hash: "" });
 
     // Extract relevant config sections
     const resolved = configData.resolved || {};
@@ -570,6 +590,12 @@ export async function GET(request: NextRequest) {
       },
       prefs,
       configHash: configData.hash || null,
+      ...(warnings.length > 0
+        ? {
+            warning: warnings.join(" | "),
+            degraded: true,
+          }
+        : {}),
     });
   } catch (err) {
     console.error("Audio API GET error:", err);
