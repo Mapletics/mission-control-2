@@ -17,6 +17,7 @@ import {
 } from "@/lib/gog-google";
 import { buildGoogleIntegrationsSnapshot } from "@/lib/google-integrations-api";
 import {
+  accountOwnedByAgent,
   appendGoogleApproval,
   appendGoogleAuditEntry,
   createDefaultGoogleAccount,
@@ -55,6 +56,22 @@ function requireString(value: unknown, field: string): string {
     throw new Error(`${field} is required`);
   }
   return value.trim();
+}
+
+function requireAgentId(value: unknown): string {
+  return requireString(value, "agentId");
+}
+
+function requireOwnedAccount(
+  store: GoogleIntegrationsStore,
+  accountId: string,
+  agentId: string,
+): GoogleAccountRecord {
+  const account = getAccountOrThrow(store, accountId);
+  if (!accountOwnedByAgent(account, agentId)) {
+    throw new Error(`Google account ${account.email} is owned by ${account.ownerAgentId}, not ${agentId}.`);
+  }
+  return account;
 }
 
 function sanitizeStringList(value: unknown): string[] {
@@ -359,9 +376,10 @@ export async function GET(request: NextRequest) {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : String(error) },
-      { status: 500 },
+      { ok: false, error: message },
+      { status: message.includes("owned by") ? 403 : 500 },
     );
   }
 }
@@ -374,14 +392,22 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case "start-connect": {
+        const agentId = requireAgentId(body.agentId);
         const email = requireString(body.email, "email").toLowerCase();
         const accessLevel = requireString(body.accessLevel, "accessLevel");
         if (!isGoogleAccessLevel(accessLevel)) {
           return NextResponse.json({ error: "Invalid access level" }, { status: 400 });
         }
-        const existing =
-          store.accounts.find((entry) => entry.email === email) ||
-          createDefaultGoogleAccount({ email, accessLevel });
+        const existing = store.accounts.find((entry) => entry.email === email);
+        if (existing && existing.ownerAgentId !== agentId) {
+          return NextResponse.json(
+            { error: `This Google account is already assigned to ${existing.ownerAgentId}.` },
+            { status: 409 },
+          );
+        }
+        const base =
+          existing ||
+          createDefaultGoogleAccount({ email, accessLevel, ownerAgentId: agentId });
 
         // Use live auth (gog starts its own callback server) with remote fallback
         let authUrl: string;
@@ -405,7 +431,8 @@ export async function POST(request: NextRequest) {
         }
 
         const nextAccount: GoogleAccountRecord = {
-          ...existing,
+          ...base,
+          ownerAgentId: agentId,
           accessLevel,
           pendingAuthUrl: authUrl,
           pendingAuthStartedAt: Date.now(),
@@ -437,7 +464,7 @@ export async function POST(request: NextRequest) {
           ok: true,
           authUrl,
           authMode,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
@@ -496,8 +523,9 @@ export async function POST(request: NextRequest) {
 
       case "finish-connect": {
         const accountId = requireString(body.accountId, "accountId");
+        const agentId = requireAgentId(body.agentId);
         const authUrl = requireString(body.authUrl, "authUrl");
-        const account = getAccountOrThrow(store, accountId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         // Clean up any live session first
         cleanupGogAuthSession(account.email);
         await finishGogRemoteAuth({
@@ -525,21 +553,30 @@ export async function POST(request: NextRequest) {
         await saveGoogleIntegrationsStore(store);
         return NextResponse.json({
           ok: true,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
       case "import-existing-account": {
+        const agentId = requireAgentId(body.agentId);
         const email = requireString(body.email, "email").toLowerCase();
         const accessLevel = requireString(body.accessLevel, "accessLevel");
         if (!isGoogleAccessLevel(accessLevel)) {
           return NextResponse.json({ error: "Invalid access level" }, { status: 400 });
         }
+        const existing = store.accounts.find((entry) => entry.email === email);
+        if (existing && existing.ownerAgentId !== agentId) {
+          return NextResponse.json(
+            { error: `This Google account is already assigned to ${existing.ownerAgentId}.` },
+            { status: 409 },
+          );
+        }
         const base =
-          store.accounts.find((entry) => entry.email === email) ||
-          createDefaultGoogleAccount({ email, accessLevel });
+          existing ||
+          createDefaultGoogleAccount({ email, accessLevel, ownerAgentId: agentId });
         const checked = await checkAccountAccess({
           ...base,
+          ownerAgentId: agentId,
           accessLevel,
           status: "connected",
           pendingAuthUrl: null,
@@ -559,13 +596,14 @@ export async function POST(request: NextRequest) {
         await saveGoogleIntegrationsStore(store);
         return NextResponse.json({
           ok: true,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
       case "disconnect-account": {
         const accountId = requireString(body.accountId, "accountId");
-        const account = getAccountOrThrow(store, accountId);
+        const agentId = requireAgentId(body.agentId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         const warning = await disconnectGogAccount(account.email);
         store = removeGoogleAccount(store, accountId);
         store = appendGoogleAuditEntry(store, {
@@ -581,17 +619,18 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           ok: true,
           warning,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
       case "set-access-level": {
         const accountId = requireString(body.accountId, "accountId");
+        const agentId = requireAgentId(body.agentId);
         const accessLevel = requireString(body.accessLevel, "accessLevel");
         if (!isGoogleAccessLevel(accessLevel)) {
           return NextResponse.json({ error: "Invalid access level" }, { status: 400 });
         }
-        const account = getAccountOrThrow(store, accountId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         store = upsertGoogleAccount(store, {
           ...account,
           accessLevel,
@@ -599,18 +638,19 @@ export async function POST(request: NextRequest) {
         await saveGoogleIntegrationsStore(store);
         return NextResponse.json({
           ok: true,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
       case "set-custom-capability": {
         const accountId = requireString(body.accountId, "accountId");
+        const agentId = requireAgentId(body.agentId);
         const capability = requireString(body.capability, "capability");
         if (!isGoogleCapabilityKey(capability)) {
           return NextResponse.json({ error: "Invalid capability" }, { status: 400 });
         }
         const enabled = body.enabled === true;
-        const account = getAccountOrThrow(store, accountId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         store = upsertGoogleAccount(store, {
           ...account,
           customCapabilityAccess: {
@@ -622,18 +662,19 @@ export async function POST(request: NextRequest) {
         await saveGoogleIntegrationsStore(store);
         return NextResponse.json({
           ok: true,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
       case "set-service-access": {
         const accountId = requireString(body.accountId, "accountId");
+        const agentId = requireAgentId(body.agentId);
         const service = body.service;
         const mode = String(body.mode || "");
         if (!isGoogleService(service) || (mode !== "read" && mode !== "write")) {
           return NextResponse.json({ error: "Invalid service or mode" }, { status: 400 });
         }
-        const account = getAccountOrThrow(store, accountId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         const serviceCapabilities = GOOGLE_CAPABILITY_DEFINITIONS.filter(
           (entry) => entry.service === service,
         );
@@ -650,7 +691,7 @@ export async function POST(request: NextRequest) {
         await saveGoogleIntegrationsStore(store);
         return NextResponse.json({
           ok: true,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
@@ -662,6 +703,7 @@ export async function POST(request: NextRequest) {
         if (!isGoogleCapabilityKey(capability) || !isGoogleAgentPolicy(policy)) {
           return NextResponse.json({ error: "Invalid capability or policy" }, { status: 400 });
         }
+        requireOwnedAccount(store, accountId, agentId);
         store = setGoogleAgentPolicyRecord(store, {
           accountId,
           agentId,
@@ -677,17 +719,15 @@ export async function POST(request: NextRequest) {
 
       case "set-watch-config": {
         const accountId = requireString(body.accountId, "accountId");
-        const account = getAccountOrThrow(store, accountId);
+        const agentId = requireAgentId(body.agentId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         const watchPatch = (body.watch || {}) as Partial<GoogleWatchConfig>;
         store = upsertGoogleAccount(store, {
           ...account,
           watch: {
             ...account.watch,
             enabled: watchPatch.enabled === true,
-            targetAgentId:
-              typeof watchPatch.targetAgentId === "string"
-                ? watchPatch.targetAgentId
-                : account.watch.targetAgentId,
+            targetAgentId: account.ownerAgentId,
             label:
               typeof watchPatch.label === "string" ? watchPatch.label : account.watch.label,
             projectId:
@@ -738,13 +778,14 @@ export async function POST(request: NextRequest) {
         await saveGoogleIntegrationsStore(store);
         return NextResponse.json({
           ok: true,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
       case "setup-watch": {
         const accountId = requireString(body.accountId, "accountId");
-        const account = getAccountOrThrow(store, accountId);
+        const agentId = requireAgentId(body.agentId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         if (!account.watch.projectId.trim()) {
           return NextResponse.json(
             { error: "Project ID is required before Gmail watch setup." },
@@ -791,26 +832,27 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           ok: true,
           result,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
       case "check-access": {
         const accountId = requireString(body.accountId, "accountId");
-        const account = getAccountOrThrow(store, accountId);
+        const agentId = requireAgentId(body.agentId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         const checked = await checkAccountAccess(account);
         store = upsertGoogleAccount(store, checked);
         await saveGoogleIntegrationsStore(store);
         return NextResponse.json({
           ok: true,
-          snapshot: await buildGoogleIntegrationsSnapshot(String(body.agentId || "") || null),
+          snapshot: await buildGoogleIntegrationsSnapshot(agentId),
         });
       }
 
       case "gmail-search": {
         const accountId = requireString(body.accountId, "accountId");
         const agentId = requireString(body.agentId, "agentId");
-        const account = getAccountOrThrow(store, accountId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         const result = await queueOrExecuteAction({
           store,
           account,
@@ -841,7 +883,7 @@ export async function POST(request: NextRequest) {
         const accountId = requireString(body.accountId, "accountId");
         const agentId = requireString(body.agentId, "agentId");
         const threadId = requireString(body.threadId, "threadId");
-        const account = getAccountOrThrow(store, accountId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         const result = await queueOrExecuteAction({
           store,
           account,
@@ -872,7 +914,7 @@ export async function POST(request: NextRequest) {
       case "gmail-send": {
         const accountId = requireString(body.accountId, "accountId");
         const agentId = requireString(body.agentId, "agentId");
-        const account = getAccountOrThrow(store, accountId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         const capability =
           action === "gmail-draft"
             ? "gmail.draft-reply"
@@ -920,7 +962,7 @@ export async function POST(request: NextRequest) {
       case "calendar-list": {
         const accountId = requireString(body.accountId, "accountId");
         const agentId = requireString(body.agentId, "agentId");
-        const account = getAccountOrThrow(store, accountId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         const result = await queueOrExecuteAction({
           store,
           account,
@@ -950,7 +992,7 @@ export async function POST(request: NextRequest) {
       case "calendar-update": {
         const accountId = requireString(body.accountId, "accountId");
         const agentId = requireString(body.agentId, "agentId");
-        const account = getAccountOrThrow(store, accountId);
+        const account = requireOwnedAccount(store, accountId, agentId);
         const capability =
           action === "calendar-create"
             ? "calendar.create-event"

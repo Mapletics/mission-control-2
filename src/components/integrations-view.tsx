@@ -5,15 +5,20 @@ import { useSmartPoll } from "@/hooks/use-smart-poll";
 import { useSearchParams } from "next/navigation";
 import {
   AlertCircle,
+  BookOpen,
   CalendarDays,
   CheckCircle2,
   Eye,
   ExternalLink,
+  GitBranch,
   HardDrive,
   Inbox,
   Mail,
   MailCheck,
   MailPlus,
+  MessageSquare,
+  Network,
+  Plus,
   RefreshCw,
   Search,
   Send,
@@ -51,6 +56,7 @@ type AccountRecord = {
   id: string;
   email: string;
   label: string;
+  ownerAgentId: string;
   status: "connected" | "pending" | "needs-reauthorization" | "limited-access" | "error";
   accessLevel: "read-only" | "read-draft" | "read-write" | "custom";
   pendingAuthUrl: string | null;
@@ -103,6 +109,72 @@ type AccountRecord = {
   };
 };
 
+type IntegrationProviderKey =
+  | "google-workspace"
+  | "github"
+  | "notion"
+  | "slack";
+
+type IntegrationProviderOverview = {
+  key: IntegrationProviderKey;
+  label: string;
+  description: string;
+  status: "live" | "planned";
+  connectionCount: number;
+  agentCount: number;
+  createEnabled: boolean;
+  manageLabel: string;
+};
+
+type IntegrationConnectionOverview = {
+  id: string;
+  providerKey: IntegrationProviderKey;
+  providerLabel: string;
+  label: string;
+  externalRef: string;
+  ownerAgentId: string;
+  ownerAgentName: string;
+  status: AccountRecord["status"];
+  accessLevel: AccountRecord["accessLevel"];
+  accessLabel: string;
+  scopeBadges: string[];
+  agentAccess: Array<{
+    agentId: string;
+    agentName: string;
+    relation: "owner" | "none";
+    accessLevel: AccountRecord["accessLevel"] | "none";
+    summary: string;
+  }>;
+  createdAt: number;
+  updatedAt: number;
+};
+
+type SlackConnectionDetail = IntegrationConnectionOverview & {
+  accountId: string;
+  accountLabel: string;
+  configured: boolean;
+  running: boolean;
+  bindingCount: number;
+  allowedChannels: Array<{
+    channelId: string;
+    allow: boolean;
+    requireMention: boolean;
+  }>;
+};
+
+type IntegrationAgentMatrixRow = {
+  agentId: string;
+  agentName: string;
+  isDefault: boolean;
+  providers: Array<{
+    providerKey: IntegrationProviderKey;
+    providerLabel: string;
+    connectionCount: number;
+    summary: string;
+    createEnabled: boolean;
+  }>;
+};
+
 type Approval = {
   id: string;
   accountId: string;
@@ -149,9 +221,15 @@ type Snapshot = {
   agents: AgentSummary[];
   selectedAgentId: string | null;
   capabilities: Capability[];
+  overview: {
+    providers: IntegrationProviderOverview[];
+    connections: IntegrationConnectionOverview[];
+    agentMatrix: IntegrationAgentMatrixRow[];
+  };
   store: {
     updatedAt: number;
     accounts: AccountRecord[];
+    slackConnections: SlackConnectionDetail[];
     approvals: Approval[];
     audit: AuditEntry[];
   };
@@ -221,6 +299,48 @@ const POLICY_OPTIONS = [
   { value: "ask", label: "Requires Approval" },
   { value: "allow", label: "Allowed" },
 ] as const;
+
+const PROVIDER_ORDER: Array<IntegrationProviderKey | "all"> = [
+  "all",
+  "google-workspace",
+  "github",
+  "notion",
+  "slack",
+];
+
+function providerIcon(key: IntegrationProviderKey) {
+  switch (key) {
+    case "google-workspace":
+      return HardDrive;
+    case "github":
+      return GitBranch;
+    case "notion":
+      return BookOpen;
+    case "slack":
+      return MessageSquare;
+  }
+}
+
+function providerStatusTone(status: IntegrationProviderOverview["status"]) {
+  return status === "live"
+    ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+    : "border-stone-300 bg-stone-100 text-stone-700 dark:border-[#30363d] dark:bg-[#171b1f] dark:text-[#a8b0ba]";
+}
+
+function accessTone(accessLevel: AccountRecord["accessLevel"] | "none") {
+  switch (accessLevel) {
+    case "read-write":
+      return "border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
+    case "read-draft":
+      return "border-blue-500/20 bg-blue-500/10 text-blue-700 dark:text-blue-300";
+    case "read-only":
+      return "border-stone-300 bg-stone-100 text-stone-700 dark:border-[#30363d] dark:bg-[#171b1f] dark:text-[#c7d0d9]";
+    case "custom":
+      return "border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+    default:
+      return "border-stone-300 bg-transparent text-stone-500 dark:border-[#30363d] dark:text-[#8d98a5]";
+  }
+}
 
 function formatAgo(ts: number | null): string {
   if (!ts) return "Never";
@@ -314,8 +434,12 @@ export function IntegrationsView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [activeView, setActiveView] = useState<"overview" | "add" | "details">("overview");
+  const [selectedAddProvider, setSelectedAddProvider] = useState<IntegrationProviderKey | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string>("");
+  const [selectedSlackConnectionId, setSelectedSlackConnectionId] = useState<string>("");
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [providerFilter, setProviderFilter] = useState<IntegrationProviderKey | "all">("all");
   const [connectEmail, setConnectEmail] = useState("");
   const [connectAccessLevel, setConnectAccessLevel] = useState<AccountRecord["accessLevel"]>("read-only");
   const [redirectUrl, setRedirectUrl] = useState("");
@@ -355,6 +479,11 @@ export function IntegrationsView() {
         current && json.store.accounts.some((entry) => entry.id === current)
           ? current
           : json.store.accounts[0]?.id || "",
+      );
+      setSelectedSlackConnectionId((current) =>
+        current && json.store.slackConnections.some((entry) => entry.id === current)
+          ? current
+          : "",
       );
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError));
@@ -423,7 +552,11 @@ export function IntegrationsView() {
             const pending = json.snapshot.store.accounts.find(
               (a: AccountRecord) => a.email === String(body.email).toLowerCase() && a.pendingAuthUrl,
             );
-            if (pending) setSelectedAccountId(pending.id);
+            if (pending) {
+              setSelectedSlackConnectionId("");
+              setSelectedAccountId(pending.id);
+              setActiveView("details");
+            }
           }
         }
         if (json.warning) setNotice(json.warning);
@@ -456,6 +589,12 @@ export function IntegrationsView() {
     [data, selectedAccountId],
   );
 
+  const selectedSlackConnection = useMemo(
+    () =>
+      data?.store.slackConnections.find((entry) => entry.id === selectedSlackConnectionId) || null,
+    [data, selectedSlackConnectionId],
+  );
+
   const selectedAgent = useMemo(
     () => data?.agents.find((entry) => entry.id === selectedAgentId) || null,
     [data, selectedAgentId],
@@ -464,6 +603,41 @@ export function IntegrationsView() {
   const pendingApprovals = useMemo(
     () => (data?.store.approvals || []).filter((entry) => entry.status === "pending"),
     [data],
+  );
+
+  const providerOverview = useMemo(
+    () => data?.overview.providers || [],
+    [data],
+  );
+
+  const visibleOverviewConnections = useMemo(() => {
+    const allConnections = data?.overview.connections || [];
+    return providerFilter === "all"
+      ? allConnections
+      : allConnections.filter((connection) => connection.providerKey === providerFilter);
+  }, [data, providerFilter]);
+
+  const agentMatrixRows = useMemo(
+    () => data?.overview.agentMatrix || [],
+    [data],
+  );
+
+  const ownedSlackConnections = useMemo(
+    () =>
+      (data?.store.slackConnections || []).filter(
+        (connection) => connection.ownerAgentId === selectedAgentId,
+      ),
+    [data, selectedAgentId],
+  );
+
+  const slackProviderOverview = useMemo(
+    () => providerOverview.find((provider) => provider.key === "slack") || null,
+    [providerOverview],
+  );
+
+  const googleProviderOverview = useMemo(
+    () => providerOverview.find((provider) => provider.key === "google-workspace") || null,
+    [providerOverview],
   );
 
   const accountMatrix = useMemo(
@@ -513,6 +687,7 @@ export function IntegrationsView() {
   }, [accountMatrix, selectedAccount]);
 
   const canAct = Boolean(selectedAccount && selectedAgent);
+  const hasDetailSelection = Boolean(selectedAccount || selectedSlackConnection);
 
   const syncAgentSelection = useCallback(
     async (agentId: string) => {
@@ -526,6 +701,48 @@ export function IntegrationsView() {
     if (typeof document === "undefined") return;
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
+
+  const handleNewIntegration = useCallback(
+    (providerKey: IntegrationProviderKey) => {
+      setActiveView("add");
+      setSelectedAddProvider(providerKey);
+      setProviderFilter(providerKey);
+      if (providerKey === "google-workspace") {
+        return;
+      }
+      if (providerKey === "slack") {
+        setNotice("Slack is live and read from the gateway. Editing stays OpenClaw-managed for now.");
+        return;
+      }
+      const provider = providerOverview.find((entry) => entry.key === providerKey);
+      setNotice(
+        `${provider?.label || "This provider"} is not wired yet. The central integrations shell is ready, but only Google and Slack are active today.`,
+      );
+    },
+    [focusSection, providerOverview],
+  );
+
+  const handleOpenOverviewConnection = useCallback(
+    async (connection: IntegrationConnectionOverview) => {
+      if (connection.providerKey === "slack") {
+        await syncAgentSelection(connection.ownerAgentId);
+        setSelectedAccountId("");
+        setSelectedSlackConnectionId(connection.id);
+        setActiveView("details");
+        setNotice("Slack details are live from the gateway. Editing still happens through OpenClaw config.");
+        return;
+      }
+      if (connection.providerKey !== "google-workspace") {
+        setNotice(`${connection.providerLabel} does not have an interactive detail view yet.`);
+        return;
+      }
+      await syncAgentSelection(connection.ownerAgentId);
+      setSelectedSlackConnectionId("");
+      setSelectedAccountId(connection.id);
+      setActiveView("details");
+    },
+    [syncAgentSelection],
+  );
 
   const handlePolicyChange = useCallback(
     async (capability: string, policy: string) => {
@@ -635,7 +852,13 @@ export function IntegrationsView() {
     <SectionLayout>
       <SectionHeader
         title="Integrations"
-        description="Connect Google, set clear read/write permissions, control what each agent can do, and handle approvals without touching a terminal."
+        description={
+          activeView === "overview"
+            ? "See which integrations already exist and which agent owns each connection."
+            : activeView === "add"
+              ? "Choose a provider and create a new integration without mixing it into the existing connection list."
+              : "Inspect one connection at a time, including ownership, health, and agent permissions."
+        }
         meta={
           data
             ? `Updated ${formatAgo(data.store.updatedAt)} · ${
@@ -645,6 +868,38 @@ export function IntegrationsView() {
         }
         actions={
           <>
+            <Button
+              type="button"
+              variant={activeView === "overview" ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setActiveView("overview");
+                setSelectedAddProvider(null);
+              }}
+            >
+              Overview
+            </Button>
+            <Button
+              type="button"
+              variant={activeView === "add" ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setActiveView("add");
+                setSelectedAddProvider(null);
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Add Integration
+            </Button>
+            <Button
+              type="button"
+              variant={activeView === "details" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setActiveView("details")}
+              disabled={!hasDetailSelection}
+            >
+              Connection Details
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -735,16 +990,335 @@ export function IntegrationsView() {
             </Card>
           ) : null}
 
+          {activeView === "overview" ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <Card>
+                  <CardContent className="flex items-center justify-between p-5">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
+                        Providers
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-stone-900 dark:text-[#f5f7fa]">
+                        {providerOverview.length}
+                      </p>
+                      <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
+                        Google and Slack are live, with room for more.
+                      </p>
+                    </div>
+                    <Network className="h-8 w-8 text-stone-400 dark:text-[#8d98a5]" />
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="flex items-center justify-between p-5">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
+                        Connections
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-stone-900 dark:text-[#f5f7fa]">
+                        {data?.overview.connections.length || 0}
+                      </p>
+                      <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
+                        Owned credentials with explicit agent binding.
+                      </p>
+                    </div>
+                    <Shield className="h-8 w-8 text-stone-400 dark:text-[#8d98a5]" />
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="flex items-center justify-between p-5">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
+                        Agents With Access
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-stone-900 dark:text-[#f5f7fa]">
+                        {googleProviderOverview?.agentCount || 0}
+                      </p>
+                      <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
+                        Google owners are isolated per agent.
+                      </p>
+                    </div>
+                    <Sparkles className="h-8 w-8 text-stone-400 dark:text-[#8d98a5]" />
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="flex items-center justify-between p-5">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
+                        Pending Approvals
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-stone-900 dark:text-[#f5f7fa]">
+                        {pendingApprovals.length}
+                      </p>
+                      <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
+                        Approval queue for the selected agent.
+                      </p>
+                    </div>
+                    <ShieldAlert className="h-8 w-8 text-stone-400 dark:text-[#8d98a5]" />
+                  </CardContent>
+                </Card>
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Existing Integrations</CardTitle>
+                    <CardDescription>
+                      Start here. Review current providers first, then add a new one only when needed.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid gap-4 md:grid-cols-2">
+                    {providerOverview.map((provider) => {
+                      const ProviderIcon = providerIcon(provider.key);
+                      return (
+                        <div
+                          key={provider.key}
+                          className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-stone-50 dark:border-[#30363d] dark:bg-[#111418]">
+                                <ProviderIcon className="h-5 w-5 text-stone-700 dark:text-[#c7d0d9]" />
+                              </div>
+                              <div>
+                                <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
+                                  {provider.label}
+                                </p>
+                                <p className="text-sm text-stone-500 dark:text-[#8d98a5]">
+                                  {provider.description}
+                                </p>
+                              </div>
+                            </div>
+                            <Badge className={cn("border", providerStatusTone(provider.status))}>
+                              {provider.status === "live" ? "Live" : "Planned"}
+                            </Badge>
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <Badge variant="outline">{provider.connectionCount} connections</Badge>
+                            <Badge variant="outline">{provider.agentCount} agents</Badge>
+                          </div>
+                          <div className="mt-4">
+                            <Button
+                              type="button"
+                              variant={provider.createEnabled ? "default" : "outline"}
+                              className="w-full justify-between"
+                              onClick={() => handleNewIntegration(provider.key)}
+                            >
+                              <span>{provider.manageLabel}</span>
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Agent Access Matrix</CardTitle>
+                    <CardDescription>
+                      Direct overview of which agent owns which integration surface.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {agentMatrixRows.map((row) => (
+                      <div
+                        key={row.agentId}
+                        className="rounded-xl border border-stone-200/80 p-4 dark:border-[#23282e]"
+                      >
+                        <div className="flex items-center gap-2">
+                          <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
+                            {row.agentName}
+                          </p>
+                          {row.isDefault ? <Badge variant="outline">default</Badge> : null}
+                        </div>
+                        <div className="mt-3 grid gap-2">
+                          {row.providers.map((provider) => (
+                            <div
+                              key={`${row.agentId}-${provider.providerKey}`}
+                              className="flex items-center justify-between rounded-lg border border-stone-200/80 px-3 py-2 text-sm dark:border-[#23282e]"
+                            >
+                              <div>
+                                <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
+                                  {provider.providerLabel}
+                                </p>
+                                <p className="text-xs text-stone-500 dark:text-[#8d98a5]">
+                                  {provider.summary}
+                                </p>
+                              </div>
+                              <Badge variant="outline">
+                                {provider.connectionCount > 0 ? `${provider.connectionCount} linked` : "none"}
+                              </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              </div>
+
+              <Card>
+                <CardHeader>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <CardTitle>Connection Directory</CardTitle>
+                      <CardDescription>
+                        Existing connections only. Open one to move into its detail screen.
+                      </CardDescription>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {PROVIDER_ORDER.map((key) => (
+                        <Button
+                          key={key}
+                          type="button"
+                          size="sm"
+                          variant={providerFilter === key ? "default" : "outline"}
+                          onClick={() => setProviderFilter(key)}
+                        >
+                          {key === "all"
+                            ? "All"
+                            : providerOverview.find((provider) => provider.key === key)?.label || key}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {visibleOverviewConnections.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-stone-300 p-4 text-sm text-stone-600 dark:border-[#30363d] dark:text-[#a8b0ba]">
+                      No connections for this filter yet.
+                    </div>
+                  ) : null}
+                  {visibleOverviewConnections.map((connection) => (
+                    <button
+                      key={connection.id}
+                      type="button"
+                      onClick={() => void handleOpenOverviewConnection(connection)}
+                      className="w-full rounded-xl border border-stone-200/80 p-4 text-left transition-colors hover:border-stone-300 dark:border-[#23282e] dark:hover:border-[#30363d]"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
+                              {connection.label}
+                            </p>
+                            <Badge variant="outline">{connection.providerLabel}</Badge>
+                            <Badge className={cn("border", statusTone(connection.status))}>
+                              {connection.status}
+                            </Badge>
+                          </div>
+                          <p className="mt-1 text-sm text-stone-500 dark:text-[#8d98a5]">
+                            {connection.externalRef}
+                          </p>
+                        </div>
+                        <div className="text-right text-sm text-stone-500 dark:text-[#8d98a5]">
+                          <p>Owner</p>
+                          <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">
+                            {connection.ownerAgentName}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge className={cn("border", accessTone(connection.accessLevel))}>
+                          {connection.accessLabel}
+                        </Badge>
+                        {connection.scopeBadges.map((scope) => (
+                          <Badge key={`${connection.id}-${scope}`} variant="outline">
+                            {scope}
+                          </Badge>
+                        ))}
+                      </div>
+                    </button>
+                  ))}
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
+
+          {activeView === "add" ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Add Integration</CardTitle>
+                  <CardDescription>
+                    Pick the provider first. Setup appears only after you choose one.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  {providerOverview.map((provider) => {
+                    const ProviderIcon = providerIcon(provider.key);
+                    const active = selectedAddProvider === provider.key;
+                    return (
+                      <button
+                        key={provider.key}
+                        type="button"
+                        onClick={() => setSelectedAddProvider(provider.key)}
+                        className={cn(
+                          "rounded-xl border p-4 text-left transition-colors",
+                          active
+                            ? "border-blue-500/50 bg-blue-500/5"
+                            : "border-stone-200/80 hover:border-stone-300 dark:border-[#23282e] dark:hover:border-[#30363d]",
+                        )}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-stone-200 bg-stone-50 dark:border-[#30363d] dark:bg-[#111418]">
+                              <ProviderIcon className="h-5 w-5 text-stone-700 dark:text-[#c7d0d9]" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">{provider.label}</p>
+                              <p className="text-sm text-stone-500 dark:text-[#8d98a5]">{provider.description}</p>
+                            </div>
+                          </div>
+                          <Badge className={cn("border", providerStatusTone(provider.status))}>
+                            {provider.status === "live" ? "Live" : "Planned"}
+                          </Badge>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+
+              {selectedAddProvider && selectedAddProvider !== "google-workspace" ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>
+                      {providerOverview.find((provider) => provider.key === selectedAddProvider)?.label || "Provider"} setup
+                    </CardTitle>
+                    <CardDescription>
+                      {selectedAddProvider === "slack"
+                        ? "Slack is already read live from the gateway. The next cleanup step is to move its create and edit flow into this dedicated setup screen."
+                        : "This provider already has a slot in the model, but the setup flow is not wired yet."}
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              ) : null}
+            </>
+          ) : null}
+
+          {activeView !== "overview" ? (
           <div className="grid gap-6 lg:grid-cols-[1.05fr_1.95fr]">
             <div className="space-y-6">
-              <Card>
+              {activeView === "add" && selectedAddProvider === "google-workspace" ? (
+              <Card id="connect-google">
                 <CardHeader>
                   <CardTitle>Runtime</CardTitle>
                   <CardDescription>
-                    Mission Control uses `gogcli` behind the scenes so non-technical users stay in the browser.
+                    Google setup depends on gateway runtime, OAuth credentials, and existing gog accounts.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
+                    <span>Slack runtime</span>
+                    <Badge className={cn("border", slackProviderOverview?.status === "live" ? statusTone("connected") : serviceStatusTone("unverified"))}>
+                      {slackProviderOverview?.status === "live"
+                        ? `${slackProviderOverview.connectionCount} linked`
+                        : "Not detected"}
+                    </Badge>
+                  </div>
                   <div className="flex items-center justify-between rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
                     <span>gog runtime</span>
                     <Badge className={cn("border", data?.runtime.gog.available ? statusTone("connected") : statusTone("error"))}>
@@ -796,15 +1370,34 @@ export function IntegrationsView() {
                   </p>
                 </CardContent>
               </Card>
+              ) : null}
 
+              {activeView === "add" && selectedAddProvider === "google-workspace" ? (
               <Card>
                 <CardHeader>
                   <CardTitle>Connect Google</CardTitle>
                   <CardDescription>
-                    Choose an explicit access level first. The default safe option is Read Only.
+                    Connect one Google account to exactly one agent. The default safe option is Read Only.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
+                      Target agent
+                    </label>
+                    <select
+                      className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm dark:border-[#30363d] dark:bg-[#0f1318]"
+                      value={selectedAgentId}
+                      onChange={(event) => void syncAgentSelection(event.target.value)}
+                    >
+                      {(data?.agents || []).map((agent) => (
+                        <option key={agent.id} value={agent.id}>
+                          {agent.name}
+                          {agent.isDefault ? " (default)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <div className="space-y-2">
                     <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">
                       Google account email
@@ -831,6 +1424,9 @@ export function IntegrationsView() {
                     </select>
                   </div>
                   <div className="rounded-lg border border-stone-200/80 bg-stone-50 p-3 text-sm text-stone-600 dark:border-[#23282e] dark:bg-[#111418] dark:text-[#a8b0ba]">
+                    <p className="mb-2 text-xs font-medium text-stone-700 dark:text-[#d8dee6]">
+                      This connection will belong only to {selectedAgent?.name || selectedAgentId || "the selected agent"}.
+                    </p>
                     {connectAccessLevel === "read-only" && "The assistant can look things up, but cannot send or change anything."}
                     {connectAccessLevel === "read-draft" && "The assistant can read and prepare drafts, but you keep control before anything is sent."}
                     {connectAccessLevel === "read-write" && "The assistant can read and take approved actions like replying or creating events."}
@@ -843,6 +1439,7 @@ export function IntegrationsView() {
                         void runAction("start-connect", {
                           email: connectEmail,
                           accessLevel: connectAccessLevel,
+                          agentId: selectedAgentId,
                         })
                       }
                       disabled={!connectEmail.trim() || actionBusy !== null}
@@ -857,6 +1454,7 @@ export function IntegrationsView() {
                         void runAction("import-existing-account", {
                           email: connectEmail,
                           accessLevel: connectAccessLevel,
+                          agentId: selectedAgentId,
                         })
                       }
                       disabled={!connectEmail.trim() || actionBusy !== null}
@@ -894,10 +1492,12 @@ export function IntegrationsView() {
                                   ? void runAction("start-connect", {
                                       email: account.email,
                                       accessLevel: connectAccessLevel,
+                                      agentId: selectedAgentId,
                                     })
                                   : void runAction("import-existing-account", {
                                       email: account.email,
                                       accessLevel: connectAccessLevel,
+                                      agentId: selectedAgentId,
                                     })
                               }
                               disabled={actionBusy !== null}
@@ -920,12 +1520,14 @@ export function IntegrationsView() {
                   </div>
                 </CardContent>
               </Card>
+              ) : null}
 
+              {activeView === "details" ? (
               <Card>
                 <CardHeader>
                   <CardTitle>Accounts</CardTitle>
                   <CardDescription>
-                    Connected Google accounts and their current safety level.
+                    Google accounts owned by {selectedAgent?.name || selectedAgentId || "the selected agent"}.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -938,7 +1540,11 @@ export function IntegrationsView() {
                     <button
                       key={account.id}
                       type="button"
-                      onClick={() => setSelectedAccountId(account.id)}
+                      onClick={() => {
+                        setActiveView("details");
+                        setSelectedSlackConnectionId("");
+                        setSelectedAccountId(account.id);
+                      }}
                       className={cn(
                         "w-full rounded-xl border px-4 py-3 text-left transition-colors",
                         selectedAccountId === account.id
@@ -957,6 +1563,7 @@ export function IntegrationsView() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Badge variant="outline">Google</Badge>
+                        <Badge variant="outline">Owner {account.ownerAgentId}</Badge>
                         <Badge variant="outline">{ACCESS_LEVEL_LABELS[account.accessLevel]}</Badge>
                         <Badge variant="outline">Gmail {account.serviceStates.gmail.scopeStatus}</Badge>
                         <Badge variant="outline">Calendar {account.serviceStates.calendar.scopeStatus}</Badge>
@@ -973,19 +1580,176 @@ export function IntegrationsView() {
                   ))}
                 </CardContent>
               </Card>
+              ) : null}
+
+              {activeView === "details" ? (
+              <Card id="slack-connections">
+                <CardHeader>
+                  <CardTitle>Slack connections</CardTitle>
+                  <CardDescription>
+                    Live Slack bindings owned by {selectedAgent?.name || selectedAgentId || "the selected agent"}.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {ownedSlackConnections.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-stone-300 p-4 text-sm text-stone-600 dark:border-[#30363d] dark:text-[#a8b0ba]">
+                      No Slack binding for this agent.
+                    </div>
+                  ) : null}
+                  {ownedSlackConnections.map((connection) => (
+                    <button
+                      key={connection.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveView("details");
+                        setSelectedAccountId("");
+                        setSelectedSlackConnectionId(connection.id);
+                      }}
+                      className={cn(
+                        "w-full rounded-xl border px-4 py-3 text-left transition-colors",
+                        selectedSlackConnectionId === connection.id
+                          ? "border-blue-500/50 bg-blue-500/5"
+                          : "border-stone-200/80 hover:border-stone-300 dark:border-[#23282e] dark:hover:border-[#30363d]",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium text-stone-900 dark:text-[#f5f7fa]">{connection.label}</p>
+                          <p className="text-sm text-stone-500 dark:text-[#a8b0ba]">{connection.externalRef}</p>
+                        </div>
+                        <Badge className={cn("border", statusTone(connection.status))}>
+                          {connection.running ? "running" : connection.configured ? "configured" : "pending"}
+                        </Badge>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <Badge variant="outline">Owner {connection.ownerAgentId}</Badge>
+                        <Badge variant="outline">{connection.bindingCount} binding{connection.bindingCount === 1 ? "" : "s"}</Badge>
+                        <Badge variant="outline">{connection.allowedChannels.length} routes</Badge>
+                        <Badge variant="outline">{connection.accountLabel}</Badge>
+                      </div>
+                    </button>
+                  ))}
+                </CardContent>
+              </Card>
+              ) : null}
             </div>
 
             <div className="space-y-6">
-              {!selectedAccount ? (
-                <Card>
+              {activeView === "add" && selectedAddProvider === "google-workspace" ? (
+                <Card className="border-dashed border-stone-300/80 dark:border-[#30363d]">
                   <CardHeader>
-                    <CardTitle>Select an account</CardTitle>
+                    <CardTitle>What happens next</CardTitle>
                     <CardDescription>
-                      Once you connect Google, Mission Control will show access, approvals, inbox actions, calendar actions, and troubleshooting here.
+                      Start the browser-safe Google flow here. Once the account is created, this screen will switch into connection details automatically.
                     </CardDescription>
                   </CardHeader>
                 </Card>
-              ) : (
+              ) : null}
+              {activeView === "details" && (
+                <>
+              {!selectedAccount && !selectedSlackConnection ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Select a connection</CardTitle>
+                    <CardDescription>
+                      Open a Google or Slack connection to inspect ownership, routes, health, and the exact agent boundary from one place.
+                    </CardDescription>
+                  </CardHeader>
+                </Card>
+              ) : selectedSlackConnection ? (
+                <div id="connection-details" className="space-y-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="justify-start px-0 text-stone-600 hover:bg-transparent hover:text-stone-900 dark:text-[#a8b0ba] dark:hover:text-[#f5f7fa]"
+                      onClick={() => {
+                        setSelectedSlackConnectionId("");
+                        setActiveView("overview");
+                      }}
+                    >
+                      Back
+                    </Button>
+                    <Badge className={cn("border", statusTone(selectedSlackConnection.status))}>
+                      {selectedSlackConnection.running ? "Slack live" : selectedSlackConnection.configured ? "Configured" : "Pending"}
+                    </Badge>
+                  </div>
+
+                  <Card className="border-dashed border-stone-300/80 dark:border-[#30363d]">
+                    <CardContent className="space-y-6 p-5">
+                      <section className="space-y-2">
+                        <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">
+                          Agent Ownership
+                        </p>
+                        <h2 className="text-sm font-semibold text-stone-900 dark:text-[#f5f7fa]">
+                          {selectedSlackConnection.ownerAgentName}
+                        </h2>
+                        <p className="text-xs text-stone-500 dark:text-[#8d98a5]">
+                          This Slack connection is routed to exactly one agent. The dashboard reads it live from the OpenClaw gateway, but edits still stay OpenClaw-managed for now.
+                        </p>
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <div className="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
+                            <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">Owner</p>
+                            <p className="mt-1 text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">{selectedSlackConnection.ownerAgentName}</p>
+                          </div>
+                          <div className="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
+                            <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">Slack account</p>
+                            <p className="mt-1 text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">{selectedSlackConnection.accountId}</p>
+                          </div>
+                          <div className="rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]">
+                            <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">Bindings</p>
+                            <p className="mt-1 text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">{selectedSlackConnection.bindingCount}</p>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge className={cn("border", accessTone(selectedSlackConnection.accessLevel))}>
+                            {selectedSlackConnection.accessLabel}
+                          </Badge>
+                          {selectedSlackConnection.scopeBadges.map((scope) => (
+                            <Badge key={`${selectedSlackConnection.id}-${scope}`} variant="outline">
+                              {scope}
+                            </Badge>
+                          ))}
+                        </div>
+                        <div className="rounded-xl border border-stone-200/80 bg-white p-4 dark:border-[#2c343d] dark:bg-[#171a1d]">
+                          <p className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">
+                            Allowed channels
+                          </p>
+                          {selectedSlackConnection.allowedChannels.length === 0 ? (
+                            <p className="mt-2 text-sm text-stone-500 dark:text-[#a8b0ba]">
+                              No explicit channel allowlist detected for this Slack account.
+                            </p>
+                          ) : (
+                            <div className="mt-3 grid gap-2">
+                              {selectedSlackConnection.allowedChannels.map((channel) => (
+                                <div
+                                  key={`${selectedSlackConnection.id}-${channel.channelId}`}
+                                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-stone-200/80 px-3 py-2 dark:border-[#23282e]"
+                                >
+                                  <div>
+                                    <p className="text-sm font-medium text-stone-900 dark:text-[#f5f7fa]">
+                                      {channel.channelId}
+                                    </p>
+                                    <p className="text-xs text-stone-500 dark:text-[#8d98a5]">
+                                      {channel.requireMention ? "Requires @mention" : "Can respond without mention"}
+                                    </p>
+                                  </div>
+                                  <Badge variant="outline">
+                                    {channel.allow ? "allowed" : "blocked"}
+                                  </Badge>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </section>
+                    </CardContent>
+                  </Card>
+                </div>
+              ) : selectedAccount ? (
                 <>
                   {selectedAccount.pendingAuthUrl ? (
                     <Card className="border-blue-500/30 bg-blue-500/5">
@@ -1057,16 +1821,19 @@ export function IntegrationsView() {
                     </Card>
                   ) : null}
 
-                  <div className="space-y-6">
+                  <div id="connection-details" className="space-y-6">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <Button
                         type="button"
-                        variant="ghost"
-                        className="justify-start px-0 text-stone-600 hover:bg-transparent hover:text-stone-900 dark:text-[#a8b0ba] dark:hover:text-[#f5f7fa]"
-                        onClick={() => setSelectedAccountId("")}
-                      >
-                        Back
-                      </Button>
+                      variant="ghost"
+                      className="justify-start px-0 text-stone-600 hover:bg-transparent hover:text-stone-900 dark:text-[#a8b0ba] dark:hover:text-[#f5f7fa]"
+                      onClick={() => {
+                        setSelectedAccountId("");
+                        setActiveView("overview");
+                      }}
+                    >
+                      Back
+                    </Button>
                       <div className="flex flex-wrap gap-3">
                         <Button
                           type="button"
@@ -1098,7 +1865,7 @@ export function IntegrationsView() {
                             {selectedAgent?.name || "Selected Agent"}
                           </h2>
                           <p className="text-xs text-stone-500 dark:text-[#8d98a5]">
-                            Manage tool access, scopes, and approval policies for this agent.
+                            This agent owns the selected Google account and is the only one allowed to use it.
                           </p>
                           <div className="max-w-xs pt-1">
                             <label className="text-[10px] uppercase tracking-widest text-stone-400 dark:text-[#7a8591]">
@@ -1156,7 +1923,7 @@ export function IntegrationsView() {
                                       size="sm"
                                       className="h-7 px-2 text-xs"
                                       onClick={() =>
-                                        void runAction("check-access", { accountId: selectedAccount.id })
+                                        void runAction("check-access", { accountId: selectedAccount.id, agentId: selectedAgentId })
                                       }
                                       disabled={actionBusy !== null}
                                     >
@@ -1681,25 +2448,7 @@ export function IntegrationsView() {
                         <div className="grid gap-3 md:grid-cols-2">
                           <div className="space-y-2">
                             <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">Target agent</label>
-                            <select
-                              className="flex h-10 w-full rounded-md border border-stone-200 bg-white px-3 text-sm dark:border-[#30363d] dark:bg-[#0f1318]"
-                              value={selectedAccount.watch.targetAgentId || selectedAgentId}
-                              onChange={(event) =>
-                                void runAction("set-watch-config", {
-                                  accountId: selectedAccount.id,
-                                  watch: {
-                                    ...selectedAccount.watch,
-                                    targetAgentId: event.target.value,
-                                  },
-                                })
-                              }
-                            >
-                              {(data?.agents || []).map((agent) => (
-                                <option key={agent.id} value={agent.id}>
-                                  {agent.name}
-                                </option>
-                              ))}
-                            </select>
+                            <Input value={selectedAccount.ownerAgentId} disabled />
                           </div>
                           <div className="space-y-2">
                             <label className="text-xs font-medium uppercase tracking-[0.18em] text-stone-500 dark:text-[#7a8591]">Google Cloud project ID</label>
@@ -1923,9 +2672,12 @@ export function IntegrationsView() {
                   </>
                   ) : null}
                 </>
+              ) : null}
+                </>
               )}
             </div>
           </div>
+          ) : null}
         </div>
       </SectionBody>
     </SectionLayout>

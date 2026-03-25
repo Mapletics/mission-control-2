@@ -217,6 +217,7 @@ export type GoogleAccountRecord = {
   id: string;
   email: string;
   label: string;
+  ownerAgentId: string;
   authMode: "gog-remote";
   status: GoogleAccountStatus;
   accessLevel: GoogleAccessLevel;
@@ -270,7 +271,7 @@ export type GoogleAuditEntry = {
 };
 
 export type GoogleIntegrationsStore = {
-  version: 1;
+  version: 2;
   updatedAt: number;
   accounts: GoogleAccountRecord[];
   policies: GoogleAgentPolicyRecord[];
@@ -280,6 +281,7 @@ export type GoogleIntegrationsStore = {
 
 export type GoogleAccountDraft = {
   email: string;
+  ownerAgentId: string;
   label?: string;
   accessLevel: GoogleAccessLevel;
 };
@@ -314,11 +316,11 @@ function createDefaultServiceState(service: GoogleServiceKey): GoogleServiceStat
   };
 }
 
-function createDefaultWatchConfig(): GoogleWatchConfig {
+function createDefaultWatchConfig(ownerAgentId: string): GoogleWatchConfig {
   return {
     enabled: false,
     status: "inactive",
-    targetAgentId: null,
+    targetAgentId: ownerAgentId,
     label: "INBOX",
     projectId: "",
     topic: "gog-gmail-watch",
@@ -346,6 +348,7 @@ export function createDefaultGoogleAccount(
     id: randomUUID(),
     email: draft.email.trim().toLowerCase(),
     label: draft.label?.trim() || draft.email.trim(),
+    ownerAgentId: draft.ownerAgentId,
     authMode: "gog-remote",
     status: "pending",
     accessLevel: draft.accessLevel,
@@ -355,7 +358,7 @@ export function createDefaultGoogleAccount(
       drive: createDefaultServiceState("drive"),
     },
     customCapabilityAccess: {},
-    watch: createDefaultWatchConfig(),
+    watch: createDefaultWatchConfig(draft.ownerAgentId),
     pendingAuthUrl: null,
     pendingAuthStartedAt: null,
     connectionNotes: [],
@@ -368,7 +371,7 @@ export function createDefaultGoogleAccount(
 
 export function createDefaultGoogleIntegrationsStore(): GoogleIntegrationsStore {
   return {
-    version: 1,
+    version: 2,
     updatedAt: Date.now(),
     accounts: [],
     policies: [],
@@ -410,7 +413,7 @@ function sanitizeServiceStates(
 
 function sanitizeWatchConfig(value: unknown): GoogleWatchConfig {
   const source = value && typeof value === "object" ? (value as Partial<GoogleWatchConfig>) : {};
-  const base = createDefaultWatchConfig();
+  const base = createDefaultWatchConfig("main");
   return {
     ...base,
     enabled: source.enabled === true,
@@ -470,10 +473,20 @@ function sanitizeAccount(value: unknown): GoogleAccountRecord | null {
   const email = String(record.email || "").trim().toLowerCase();
   if (!email) return null;
   const now = Date.now();
+  const ownerAgentId =
+    typeof record.ownerAgentId === "string" && record.ownerAgentId.trim()
+      ? record.ownerAgentId.trim()
+      : typeof record.watch === "object" &&
+          record.watch &&
+          typeof (record.watch as Partial<GoogleWatchConfig>).targetAgentId === "string" &&
+          (record.watch as Partial<GoogleWatchConfig>).targetAgentId?.trim()
+        ? ((record.watch as Partial<GoogleWatchConfig>).targetAgentId as string).trim()
+        : "main";
   return {
     id: typeof record.id === "string" && record.id ? record.id : randomUUID(),
     email,
     label: typeof record.label === "string" && record.label.trim() ? record.label.trim() : email,
+    ownerAgentId,
     authMode: "gog-remote",
     status:
       record.status && GOOGLE_ACCOUNT_STATUSES.includes(record.status)
@@ -484,7 +497,10 @@ function sanitizeAccount(value: unknown): GoogleAccountRecord | null {
       : "read-only",
     serviceStates: sanitizeServiceStates(record.serviceStates),
     customCapabilityAccess: sanitizeCustomCapabilityAccess(record.customCapabilityAccess),
-    watch: sanitizeWatchConfig(record.watch),
+    watch: {
+      ...sanitizeWatchConfig(record.watch),
+      targetAgentId: ownerAgentId,
+    },
     pendingAuthUrl:
       typeof record.pendingAuthUrl === "string" ? record.pendingAuthUrl : null,
     pendingAuthStartedAt:
@@ -594,7 +610,7 @@ function normalizeStore(
 ): GoogleIntegrationsStore {
   const fallback = createDefaultGoogleIntegrationsStore();
   return {
-    version: 1,
+    version: 2,
     updatedAt:
       typeof value?.updatedAt === "number" ? value.updatedAt : fallback.updatedAt,
     accounts: Array.isArray(value?.accounts)
@@ -648,6 +664,10 @@ export function upsertGoogleAccount(
   );
   const account = {
     ...nextAccount,
+    watch: {
+      ...nextAccount.watch,
+      targetAgentId: nextAccount.ownerAgentId,
+    },
     updatedAt: Date.now(),
   };
   if (index >= 0) accounts[index] = account;
@@ -712,6 +732,13 @@ export function getGoogleAgentPolicy(
   if (row) return row.policy;
   const capabilityMeta = GOOGLE_CAPABILITY_MAP[capability];
   return capabilityMeta.category === "write" ? "ask" : "allow";
+}
+
+export function accountOwnedByAgent(
+  account: GoogleAccountRecord,
+  agentId: string | null,
+): boolean {
+  return Boolean(agentId) && account.ownerAgentId === agentId;
 }
 
 export function isCapabilityEnabledForAccount(
