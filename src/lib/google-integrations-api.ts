@@ -11,11 +11,14 @@ import {
   accountOwnedByAgent,
   getGoogleAgentPolicy,
   GOOGLE_CAPABILITY_DEFINITIONS,
+  GOOGLE_SERVICES,
   isCapabilityEnabledForAccount,
   readGoogleIntegrationsStore,
   type GoogleAccountRecord,
+  type GoogleAccessLevel,
   type GoogleIntegrationsStore,
   type GoogleAgentPolicy,
+  type GoogleServiceKey,
 } from "@/lib/google-integrations-store";
 
 export type IntegrationAgentSummary = {
@@ -44,6 +47,75 @@ export type IntegrationAccountDiagnostics = {
   checks: IntegrationCheckItem[];
 };
 
+export type IntegrationProviderKey =
+  | "google-workspace"
+  | "github"
+  | "notion"
+  | "slack";
+
+export type IntegrationProviderOverview = {
+  key: IntegrationProviderKey;
+  label: string;
+  description: string;
+  status: "live" | "planned";
+  connectionCount: number;
+  agentCount: number;
+  createEnabled: boolean;
+  manageLabel: string;
+};
+
+export type IntegrationServiceScopeSummary = {
+  service: GoogleServiceKey;
+  enabled: boolean;
+  apiStatus: "ready" | "unverified" | "error";
+  scopeStatus: "full" | "readonly" | "unknown";
+};
+
+export type IntegrationConnectionAgentAccess = {
+  agentId: string;
+  agentName: string;
+  relation: "owner" | "none";
+  accessLevel: GoogleAccessLevel | "none";
+  summary: string;
+};
+
+export type IntegrationConnectionOverview = {
+  id: string;
+  providerKey: IntegrationProviderKey;
+  providerLabel: string;
+  label: string;
+  externalRef: string;
+  ownerAgentId: string;
+  ownerAgentName: string;
+  status: GoogleAccountRecord["status"];
+  accessLevel: GoogleAccessLevel;
+  serviceScopes: IntegrationServiceScopeSummary[];
+  agentAccess: IntegrationConnectionAgentAccess[];
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type IntegrationAgentMatrixCell = {
+  providerKey: IntegrationProviderKey;
+  providerLabel: string;
+  connectionCount: number;
+  summary: string;
+  createEnabled: boolean;
+};
+
+export type IntegrationAgentMatrixRow = {
+  agentId: string;
+  agentName: string;
+  isDefault: boolean;
+  providers: IntegrationAgentMatrixCell[];
+};
+
+export type IntegrationsOverview = {
+  providers: IntegrationProviderOverview[];
+  connections: IntegrationConnectionOverview[];
+  agentMatrix: IntegrationAgentMatrixRow[];
+};
+
 async function listAgents(): Promise<IntegrationAgentSummary[]> {
   try {
     const config = await fetchConfig();
@@ -64,6 +136,165 @@ async function listAgents(): Promise<IntegrationAgentSummary[]> {
   } catch {
     return [];
   }
+}
+
+function accessLevelLabel(accessLevel: GoogleAccessLevel | "none") {
+  switch (accessLevel) {
+    case "read-only":
+      return "Read only";
+    case "read-draft":
+      return "Read + draft";
+    case "read-write":
+      return "Read + write";
+    case "custom":
+      return "Custom";
+    default:
+      return "No access";
+  }
+}
+
+function providerCatalog(
+  store: GoogleIntegrationsStore,
+  agents: IntegrationAgentSummary[],
+): IntegrationProviderOverview[] {
+  const ownedGoogleAgents = new Set(store.accounts.map((account) => account.ownerAgentId));
+
+  return [
+    {
+      key: "google-workspace",
+      label: "Google Workspace",
+      description: "Gmail, Calendar, Drive and Gmail watch",
+      status: "live",
+      connectionCount: store.accounts.length,
+      agentCount: ownedGoogleAgents.size,
+      createEnabled: true,
+      manageLabel: "Connect Google",
+    },
+    {
+      key: "github",
+      label: "GitHub",
+      description: "Repo and PR access per agent",
+      status: "planned",
+      connectionCount: 0,
+      agentCount: 0,
+      createEnabled: false,
+      manageLabel: "Coming soon",
+    },
+    {
+      key: "notion",
+      label: "Notion",
+      description: "Workspace knowledge and docs access",
+      status: "planned",
+      connectionCount: 0,
+      agentCount: 0,
+      createEnabled: false,
+      manageLabel: "Coming soon",
+    },
+    {
+      key: "slack",
+      label: "Slack",
+      description: "Team-facing channels and routing",
+      status: "planned",
+      connectionCount: 0,
+      agentCount: 0,
+      createEnabled: false,
+      manageLabel: "Coming soon",
+    },
+  ] satisfies IntegrationProviderOverview[];
+}
+
+function buildConnectionOverview(
+  store: GoogleIntegrationsStore,
+  agents: IntegrationAgentSummary[],
+): IntegrationConnectionOverview[] {
+  const agentNameById = new Map(agents.map((agent) => [agent.id, agent.name]));
+
+  return store.accounts
+    .map((account) => ({
+      id: account.id,
+      providerKey: "google-workspace" as const,
+      providerLabel: "Google Workspace",
+      label: account.label,
+      externalRef: account.email,
+      ownerAgentId: account.ownerAgentId,
+      ownerAgentName: agentNameById.get(account.ownerAgentId) || account.ownerAgentId,
+      status: account.status,
+      accessLevel: account.accessLevel,
+      serviceScopes: GOOGLE_SERVICES.map((service) => ({
+        service,
+        enabled: account.serviceStates[service].enabled,
+        apiStatus: account.serviceStates[service].apiStatus,
+        scopeStatus: account.serviceStates[service].scopeStatus,
+      })),
+      agentAccess: agents.map((agent) => ({
+        agentId: agent.id,
+        agentName: agent.name,
+        relation: (agent.id === account.ownerAgentId ? "owner" : "none") as "owner" | "none",
+        accessLevel: (agent.id === account.ownerAgentId ? account.accessLevel : "none") as
+          | GoogleAccessLevel
+          | "none",
+        summary:
+          agent.id === account.ownerAgentId
+            ? accessLevelLabel(account.accessLevel)
+            : "No access",
+      })),
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt || a.label.localeCompare(b.label));
+}
+
+function buildAgentMatrix(
+  store: GoogleIntegrationsStore,
+  agents: IntegrationAgentSummary[],
+): IntegrationAgentMatrixRow[] {
+  return agents.map((agent) => {
+    const ownedGoogleConnections = store.accounts.filter(
+      (account) => account.ownerAgentId === agent.id,
+    );
+    const googleSummary =
+      ownedGoogleConnections.length === 0
+        ? "No access"
+        : ownedGoogleConnections.length === 1
+          ? `${accessLevelLabel(ownedGoogleConnections[0].accessLevel)} · ${ownedGoogleConnections[0].email}`
+          : `${ownedGoogleConnections.length} owned connections`;
+
+    return {
+      agentId: agent.id,
+      agentName: agent.name,
+      isDefault: agent.isDefault,
+      providers: [
+        {
+          providerKey: "google-workspace",
+          providerLabel: "Google Workspace",
+          connectionCount: ownedGoogleConnections.length,
+          summary: googleSummary,
+          createEnabled: true,
+        },
+        {
+          providerKey: "github",
+          providerLabel: "GitHub",
+          connectionCount: 0,
+          summary: "Not configured",
+          createEnabled: false,
+        },
+        {
+          providerKey: "notion",
+          providerLabel: "Notion",
+          connectionCount: 0,
+          summary: "Not configured",
+          createEnabled: false,
+        },
+        {
+          providerKey: "slack",
+          providerLabel: "Slack",
+          connectionCount: 0,
+          summary: "Not configured",
+          createEnabled: false,
+        },
+      ],
+    };
+  });
 }
 
 export function buildAccountDiagnostics(
@@ -216,6 +447,11 @@ export async function buildGoogleIntegrationsSnapshot(agentId: string | null = n
     ? store.accounts.filter((account) => accountOwnedByAgent(account, selectedAgentId))
     : [];
   const visibleAccountIds = new Set(visibleAccounts.map((account) => account.id));
+  const overview: IntegrationsOverview = {
+    providers: providerCatalog(store, agents),
+    connections: buildConnectionOverview(store, agents),
+    agentMatrix: buildAgentMatrix(store, agents),
+  };
 
   return {
     generatedAt: Date.now(),
@@ -228,6 +464,7 @@ export async function buildGoogleIntegrationsSnapshot(agentId: string | null = n
     agents,
     selectedAgentId,
     capabilities: GOOGLE_CAPABILITY_DEFINITIONS,
+    overview,
     store: {
       ...store,
       accounts: visibleAccounts.map((account) => ({
