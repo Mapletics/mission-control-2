@@ -57,7 +57,7 @@ export class AutoTransport implements OpenClawClient {
 
   /** CLI concurrency limiter — prevents subprocess storms during gateway restarts. */
   private activeCli = 0;
-  private readonly maxCli = 4;
+  private readonly maxCli = 12;
 
   getTransport(): TransportMode {
     return "auto";
