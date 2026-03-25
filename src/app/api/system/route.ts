@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readFile, readdir } from "fs/promises";
-import { join } from "path";
+import { basename, extname, join } from "path";
 import { getOpenClawHome, getSystemSkillsDir, getDefaultWorkspaceSync, getSharedSkillsDirs, readConfigFile } from "@/lib/paths";
 import { fetchGatewaySessions, type NormalizedGatewaySession } from "@/lib/gateway-sessions";
 
@@ -299,6 +299,13 @@ async function getSkills(): Promise<SkillInfo[]> {
       for (const e of entries) {
         if (e.isDirectory() && !skills.find((s) => s.name === e.name)) {
           skills.push({ name: e.name, source: "shared" });
+          continue;
+        }
+        if (!e.isDirectory() && e.name.endsWith(".md") && !e.name.startsWith("_")) {
+          const name = basename(e.name, extname(e.name));
+          if (!skills.find((s) => s.name === name)) {
+            skills.push({ name, source: "shared" });
+          }
         }
       }
     }

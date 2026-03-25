@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { access, readFile, readdir, writeFile, mkdir } from "fs/promises";
 import { constants as FS_CONSTANTS } from "fs";
-import { join, dirname } from "path";
+import { basename, dirname, extname, join } from "path";
 import { getDefaultWorkspaceSync, getOpenClawHome, getSharedSkillsDirs, getSystemSkillsDir } from "@/lib/paths";
 import { gatewayCall, runCliJson } from "@/lib/openclaw";
 import { buildModelsSummary } from "@/lib/models-summary";
@@ -546,10 +546,19 @@ async function collectSkillMarkdownPaths() {
       return;
     }
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const skillPath = join(root, entry.name, "SKILL.md");
-      if (await exists(skillPath)) {
-        out.push({ name: entry.name, source, path: skillPath });
+      if (entry.isDirectory()) {
+        const skillPath = join(root, entry.name, "SKILL.md");
+        if (await exists(skillPath)) {
+          out.push({ name: entry.name, source, path: skillPath });
+        }
+        continue;
+      }
+      if (source === "shared" && entry.name.endsWith(".md") && !entry.name.startsWith("_")) {
+        out.push({
+          name: basename(entry.name, extname(entry.name)),
+          source,
+          path: join(root, entry.name),
+        });
       }
     }
   };

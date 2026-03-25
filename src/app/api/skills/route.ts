@@ -3,7 +3,7 @@ import { runCliJson } from "@/lib/openclaw";
 import { fetchConfig, patchConfig } from "@/lib/gateway-config";
 import { access, readFile, readdir } from "fs/promises";
 import { constants as FS_CONSTANTS } from "fs";
-import { join } from "path";
+import { basename, extname, join } from "path";
 import { getSharedSkillsDirs } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
@@ -117,6 +117,10 @@ function extractDescription(markdown: string): string {
   return lines[0] || "Shared skill";
 }
 
+function toSharedSkillName(fileName: string): string {
+  return basename(fileName, extname(fileName));
+}
+
 async function loadSharedSkills(): Promise<SharedSkillEntry[]> {
   const dirs = await getSharedSkillsDirs();
   const byName = new Map<string, SharedSkillEntry>();
@@ -130,11 +134,21 @@ async function loadSharedSkills(): Promise<SharedSkillEntry[]> {
     }
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      if (byName.has(entry.name)) continue;
+      let skillName = "";
+      let filePath = "";
 
-      const filePath = join(baseDir, entry.name, "SKILL.md");
-      if (!(await exists(filePath))) continue;
+      if (entry.isDirectory()) {
+        skillName = entry.name;
+        filePath = join(baseDir, entry.name, "SKILL.md");
+        if (!(await exists(filePath))) continue;
+      } else {
+        if (!entry.name.endsWith(".md")) continue;
+        if (entry.name.startsWith("_")) continue;
+        skillName = toSharedSkillName(entry.name);
+        filePath = join(baseDir, entry.name);
+      }
+
+      if (byName.has(skillName)) continue;
 
       let description = "Shared skill";
       try {
@@ -143,8 +157,8 @@ async function loadSharedSkills(): Promise<SharedSkillEntry[]> {
         // leave fallback description
       }
 
-      byName.set(entry.name, {
-        name: entry.name,
+      byName.set(skillName, {
+        name: skillName,
         filePath,
         baseDir,
         description,
