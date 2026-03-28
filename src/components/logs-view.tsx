@@ -125,6 +125,7 @@ export function LogsView() {
   const [sources, setSources] = useState<string[]>([]);
   const [stats, setStats] = useState<LogStats>({ info: 0, warn: 0, error: 0 });
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -148,12 +149,19 @@ export function LogsView() {
       if (sourceFilter) params.set("source", sourceFilter);
       if (levelFilter) params.set("level", levelFilter);
       const res = await fetch(`/api/logs?${params}`, { signal: AbortSignal.timeout(10000) });
+      if (!res.ok) {
+        setFetchError(`Failed to load logs (${res.status})`);
+        setLoading(false);
+        return;
+      }
       const data = await res.json();
       setEntries(data.entries || []);
       setSources(data.sources || []);
       setStats(data.stats || { info: 0, warn: 0, error: 0 });
+      setFetchError(null);
       setLoading(false);
-    } catch {
+    } catch (err) {
+      setFetchError(err instanceof Error ? err.message : "Network error");
       setLoading(false);
     }
   }, [limit, debouncedSearch, sourceFilter, levelFilter]);
@@ -296,6 +304,24 @@ export function LogsView() {
       />
 
       <SectionBody width="wide" padding="regular" innerClassName="space-y-4">
+        {/* Error banner */}
+        {fetchError && entries.length === 0 && (
+          <div className="flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-500/20 dark:bg-red-500/10">
+            <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-red-700 dark:text-red-400">Failed to load logs</p>
+              <p className="mt-0.5 text-xs text-red-600 dark:text-red-300/70">{fetchError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setLoading(true); setFetchError(null); void fetchLogs(); }}
+              className="shrink-0 rounded-lg bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-200 dark:bg-red-500/20 dark:text-red-300 dark:hover:bg-red-500/30"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {showFilters && (
           <div className="rounded-xl border border-stone-200 bg-white p-4 dark:border-[#2c343d] dark:bg-[#171a1d]">
             <div className="mb-3 flex items-center justify-between gap-2">

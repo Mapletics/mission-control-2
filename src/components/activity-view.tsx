@@ -13,6 +13,7 @@ import {
   Radio,
   Terminal,
   Zap,
+  XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SectionBody, SectionHeader, SectionLayout } from "@/components/section-layout";
@@ -210,12 +211,14 @@ function EventCard({ event }: { event: ActivityEvent }) {
 export function ActivityView() {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<FilterType>("all");
 
   const fetchActivity = useCallback(async () => {
     try {
       const res = await fetch("/api/activity", { cache: "no-store" });
       if (!res.ok) {
+        setError(`Failed to load activity (${res.status})`);
         setLoading(false);
         return;
       }
@@ -223,8 +226,9 @@ export function ActivityView() {
       // Sort newest-first before storing
       const sorted = (Array.isArray(data) ? data : []).slice().sort((a, b) => b.timestamp - a.timestamp);
       setEvents(sorted);
-    } catch {
-      /* ignore */
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Network error");
     }
     setLoading(false);
   }, []);
@@ -264,6 +268,24 @@ export function ActivityView() {
       />
 
       <SectionBody>
+        {/* Error banner */}
+        {error && events.length === 0 && (
+          <div className="mb-5 flex items-center gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 dark:border-red-500/20 dark:bg-red-500/10">
+            <XCircle className="h-4 w-4 shrink-0 text-red-500" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-red-700 dark:text-red-400">Failed to load activity</p>
+              <p className="mt-0.5 text-xs text-red-600 dark:text-red-300/70">{error}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setLoading(true); setError(null); void fetchActivity(); }}
+              className="shrink-0 rounded-lg bg-red-100 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-200 dark:bg-red-500/20 dark:text-red-300 dark:hover:bg-red-500/30"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* Filter pills */}
         <div className="mb-5 flex flex-wrap items-center gap-2" role="group" aria-label="Filter activity by type">
           <Filter className="h-3.5 w-3.5 shrink-0 text-stone-400 dark:text-[#8d98a5]" />

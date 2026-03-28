@@ -2194,6 +2194,7 @@ export function CronView() {
   const [sortBy, setSortBy] = useState<"name" | "status" | "next" | "last">("next");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [runs, setRuns] = useState<Record<string, RunEntry[]>>({});
+  const [runsLimit, setRunsLimit] = useState<Record<string, number>>({});
   const [runsLoading, setRunsLoading] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -2269,11 +2270,12 @@ export function CronView() {
     queueMicrotask(() => fetchJobs());
   }, [fetchJobs]);
 
-  const fetchRuns = useCallback(async (jobId: string) => {
+  const fetchRuns = useCallback(async (jobId: string, limit?: number) => {
+    const effectiveLimit = limit ?? runsLimit[jobId] ?? 20;
     setRunsLoading(jobId);
     try {
       const res = await fetch(
-        `/api/cron?action=runs&id=${jobId}&limit=20`
+        `/api/cron?action=runs&id=${jobId}&limit=${effectiveLimit}`
       );
       const data = await res.json();
       setRuns((prev) => ({ ...prev, [jobId]: data.entries || [] }));
@@ -2281,7 +2283,7 @@ export function CronView() {
       /* ignore */
     }
     setRunsLoading(null);
-  }, []);
+  }, [runsLimit]);
 
   // Auto-expand the first errored job when navigated with ?show=errors
   useEffect(() => {
@@ -3225,6 +3227,20 @@ export function CronView() {
                         {jobRuns.map((run, i) => (
                           <RunCard key={`${run.ts}-${i}`} run={run} timeFormat={timeFormat} />
                         ))}
+                        {jobRuns.length >= (runsLimit[job.id] ?? 20) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextLimit = (runsLimit[job.id] ?? 20) + 20;
+                              setRunsLimit((prev) => ({ ...prev, [job.id]: nextLimit }));
+                              void fetchRuns(job.id, nextLimit);
+                            }}
+                            disabled={runsLoading === job.id}
+                            className="mt-1 w-full rounded-lg border border-foreground/10 py-2 text-xs text-muted-foreground/80 transition-colors hover:bg-muted/50 hover:text-foreground/85 disabled:opacity-50"
+                          >
+                            {runsLoading === job.id ? "Loading…" : "Load more"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
