@@ -16,16 +16,6 @@ const DashboardTour = dynamic(
  * the user is eligible to see it.
  */
 export function DashboardTourGate() {
-  const [shouldLoad] = useState(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      if (localStorage.getItem(TOUR_DONE_KEY) === "1") return false;
-    } catch {
-      // ignore storage failures
-    }
-    return window.innerWidth >= MIN_DESKTOP_WIDTH;
-  });
-
-  if (!shouldLoad) return null;
-  return <DashboardTour />;
+  // Tour disabled
+  return null;
 }

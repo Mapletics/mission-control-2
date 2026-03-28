@@ -68,23 +68,15 @@ const defaultNavItems: NavItem[] = [
   { group: "Agents", section: "agents", label: "Agents", icon: Users, href: "/agents" },
   { section: "agents", label: "Subagents", icon: Users2, href: "/agents?tab=subagents", tab: "subagents", isSubItem: true },
   { section: "agents", label: "Models", icon: Cpu, href: "/agents?tab=models", tab: "models", isSubItem: true },
-  { section: "chat", label: "Chat", icon: MessageCircle, href: "/chat" },
   { section: "sessions", label: "Sessions", icon: MessageSquare, href: "/sessions" },
   // ── Work ──
   { group: "Work", section: "tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
-  ...(!isAgentbayHosting ? [{ section: "calendar", label: "Calendar", icon: Calendar, href: "/calendar", beta: true } as NavItem] : []),
-  ...(!isAgentbayHosting ? [{ section: "integrations", label: "Integrations", icon: Puzzle, href: "/integrations", beta: true } as NavItem] : []),
   { section: "cron", label: "Cron Jobs", icon: Clock, href: "/cron" },
   { section: "cron", label: "Heartbeat", icon: Heart, href: "/heartbeat", tab: "heartbeat", isSubItem: true },
-  { section: "skills", label: "Skills", icon: Wrench, href: "/skills" },
-  { section: "skills", label: "ClawHub", icon: Package, href: "/skills?tab=clawhub", tab: "clawhub", isSubItem: true },
   // ── Knowledge ──
   { group: "Knowledge", section: "memory", label: "Memory", icon: Brain, href: "/memory" },
-  { section: "docs", label: "Documents", icon: FolderOpen, href: "/documents" },
-  { section: "vectors", label: "Vector DB", icon: Database, href: "/vectors" },
   // ── Configure ──
-  { section: "accounts", label: "API Keys", icon: KeyRound, href: "/accounts" },
-  { section: "channels", label: "Channels", icon: Radio, href: "/channels" },
+  { group: "Configure", section: "accounts", label: "API Keys", icon: KeyRound, href: "/accounts" },
   { section: "security", label: "Security", icon: ShieldCheck, href: "/security" },
   { section: "settings", label: "Preferences", icon: Settings2, href: "/settings" },
   // ── More ──

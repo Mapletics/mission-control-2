@@ -12,6 +12,14 @@ import {
   Webhook,
   Stethoscope,
   ArrowRight,
+  MessageCircle,
+  Wrench,
+  Calendar,
+  Puzzle,
+  Radio,
+  FolderOpen,
+  Database,
+  Settings2,
 } from "lucide-react";
 import { SectionBody, SectionHeader, SectionLayout } from "@/components/section-layout";
 import { cn } from "@/lib/utils";
@@ -25,6 +33,56 @@ type MoreItem = {
 };
 
 const MORE_ITEMS: MoreItem[] = [
+  {
+    href: "/chat",
+    label: "Chat",
+    description: "Chat directly with your agents.",
+    icon: MessageCircle,
+  },
+  {
+    href: "/skills",
+    label: "Skills",
+    description: "Manage and browse agent skills and ClawHub.",
+    icon: Wrench,
+  },
+  {
+    href: "/calendar",
+    label: "Calendar",
+    description: "View and manage calendar events.",
+    icon: Calendar,
+    beta: true,
+  },
+  {
+    href: "/integrations",
+    label: "Integrations",
+    description: "Connect third-party services and integrations.",
+    icon: Puzzle,
+    beta: true,
+  },
+  {
+    href: "/channels",
+    label: "Channels",
+    description: "Configure messaging channels and providers.",
+    icon: Radio,
+  },
+  {
+    href: "/documents",
+    label: "Documents",
+    description: "Browse and manage workspace documents.",
+    icon: FolderOpen,
+  },
+  {
+    href: "/vectors",
+    label: "Vector DB",
+    description: "Manage vector embeddings and semantic search.",
+    icon: Database,
+  },
+  {
+    href: "/settings",
+    label: "Preferences",
+    description: "User preferences and display settings.",
+    icon: Settings2,
+  },
   {
     href: "/terminal",
     label: "Terminal",
