@@ -111,9 +111,10 @@ export function SetupGate({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  if (status && (!status.hasModel || !status.hasApiKey)) {
-    return <OnboardingWizard onComplete={handleComplete} />;
-  }
+  // Onboarding disabled — always show the dashboard
+  // if (status && (!status.hasModel || !status.hasApiKey)) {
+  //   return <OnboardingWizard onComplete={handleComplete} />;
+  // }
 
   return <>{children}</>;
 }
