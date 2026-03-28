@@ -128,6 +128,10 @@ const ChannelsView = dynamic(
   () => import("@/components/channels-view").then((m) => m.ChannelsView),
   { loading: () => <SectionLoading /> }
 );
+const MoreView = dynamic(
+  () => import("@/components/more-view").then((m) => m.MoreView),
+  { loading: () => <SectionLoading /> }
+);
 
 const isAgentbayHosting = process.env.NEXT_PUBLIC_AGENTBAY_HOSTED === "true";
 
@@ -162,7 +166,8 @@ export type DashboardSection =
   | "doctor"
   | "activity"
   | "help"
-  | "channels";
+  | "channels"
+  | "more";
 
 function SectionContent({ section }: { section: DashboardSection }) {
   if (isAgentbayHosting && section === "tailscale") {
@@ -230,6 +235,8 @@ function SectionContent({ section }: { section: DashboardSection }) {
       return <HelpView />;
     case "channels":
       return <ChannelsView />;
+    case "more":
+      return <MoreView />;
     default:
       return <DashboardView />;
   }

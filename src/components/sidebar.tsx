@@ -41,6 +41,7 @@ import {
   HelpCircle,
   Puzzle,
   Radio,
+  MoreHorizontal,
 } from "lucide-react";
 import { getChatUnreadCount, subscribeChatStore } from "@/lib/chat-store";
 
@@ -85,17 +86,9 @@ const defaultNavItems: NavItem[] = [
   { section: "accounts", label: "API Keys", icon: KeyRound, href: "/accounts" },
   { section: "channels", label: "Channels", icon: Radio, href: "/channels" },
   { section: "security", label: "Security", icon: ShieldCheck, href: "/security" },
-  { section: "hooks", label: "Hooks", icon: Webhook, href: "/hooks" },
   { section: "settings", label: "Preferences", icon: Settings2, href: "/settings" },
-  // ── System ──
-  ...(!isAgentbayHosting ? [{ section: "doctor", label: "Doctor", icon: Stethoscope, href: "/doctor", group: "System", beta: true } as NavItem] : []),
-  { group: isAgentbayHosting ? "System" : undefined, section: "terminal", label: "Terminal", icon: SquareTerminal, href: "/terminal" },
-  { section: "logs", label: "Logs", icon: Terminal, href: "/logs" },
-  { section: "browser", label: "Browser Relay", icon: Globe, href: "/browser" },
-  { section: "audio", label: "Audio & Voice", icon: Volume2, href: "/audio" },
-  { section: "search", label: "Web Search", icon: Search, href: "/search" },
-  ...(!isAgentbayHosting ? [{ section: "tailscale", label: "Tailscale", icon: Waypoints, href: "/tailscale", beta: true } as NavItem] : []),
-  { section: "config", label: "Config", icon: Settings, href: "/config" },
+  // ── More ──
+  { group: "More", section: "more", label: "More", icon: MoreHorizontal, href: "/more" },
 ];
 
 const hostedNavItems: NavItem[] = [
@@ -192,6 +185,7 @@ function deriveSectionFromPath(pathname: string): string | null {
     "settings",
     "activity",
     "help",
+    "more",
   ]);
   return known.has(first) ? first : null;
 }
