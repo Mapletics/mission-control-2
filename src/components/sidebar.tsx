@@ -35,6 +35,7 @@ import {
   KeyRound,
   Search,
   Heart,
+  Moon,
   Settings2,
   Webhook,
   Stethoscope,
@@ -73,6 +74,7 @@ const defaultNavItems: NavItem[] = [
   { group: "Work", section: "tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
   { section: "cron", label: "Cron Jobs", icon: Clock, href: "/cron" },
   { section: "cron", label: "Heartbeat", icon: Heart, href: "/heartbeat", tab: "heartbeat", isSubItem: true },
+  { section: "night-mode", label: "Night Mode", icon: Moon, href: "/night-mode" },
   // ── Knowledge ──
   { group: "Knowledge", section: "memory", label: "Memory", icon: Brain, href: "/memory" },
   // ── Configure ──
@@ -178,6 +180,7 @@ function deriveSectionFromPath(pathname: string): string | null {
     "activity",
     "help",
     "more",
+    "night-mode",
   ]);
   return known.has(first) ? first : null;
 }
